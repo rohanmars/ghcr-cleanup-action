@@ -43187,7 +43187,6 @@ class Registry {
             return this.manifestCache.get(digest);
         }
         else {
-            console.log(`non cache load: ${digest}`);
             const response = await this.axios.get(`/v2/${this.config.owner}/${this.targetPackage}/manifests/${digest}`, {
                 transformResponse: [
                     data => {
@@ -43935,10 +43934,44 @@ class CleanupTask {
         }
         core.endGroup();
     }
+    // makes sure all required manfiests are downloaded before the deletion
+    // process runs. ensuring only package api calls are made during deletion
+    // minimizing chances of failed registry calls affecting deletion
+    async primeManifests() {
+        for (const digest of this.deleteSet) {
+            const manifest = await this.registry.getManifestByDigest(digest);
+            if (manifest.manifests) {
+                for (const imageManifest of manifest.manifests) {
+                    // call the buildLabel method which will prime manifest if its needed
+                    await this.buildLabel(imageManifest);
+                }
+            }
+            // process tagged digests (referrers)
+            const digestTag = digest.replace('sha256:', 'sha256-');
+            const tags = this.packageRepo.getTags();
+            for (const tag of tags) {
+                if (tag.startsWith(digestTag)) {
+                    const tagDigest = this.packageRepo.getDigestByTag(tag);
+                    if (tagDigest) {
+                        const tagManifest = await this.registry.getManifestByDigest(tagDigest);
+                        if (tagManifest.manifests) {
+                            for (const manifestEntry of tagManifest.manifests) {
+                                await this.buildLabel(manifestEntry);
+                                console.log('loading in primemanifests');
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
     /*
      * Deletes all the digets in the deleteSet from the package repository
      */
     async doDelete() {
+        // make sure we have the necessary manifests cached before we start the
+        // deletion process
+        await this.primeManifests();
         // now delete the images
         core.startGroup(`[${this.targetPackage}] Deleting packages`);
         if (this.deleteSet.size > 0) {

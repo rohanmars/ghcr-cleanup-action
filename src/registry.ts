@@ -125,7 +125,6 @@ export class Registry {
     if (this.manifestCache.has(digest)) {
       return this.manifestCache.get(digest)
     } else {
-      console.log(`non cache load: ${digest}`)
       const response = await this.axios.get(
         `/v2/${this.config.owner}/${this.targetPackage}/manifests/${digest}`,
         {
