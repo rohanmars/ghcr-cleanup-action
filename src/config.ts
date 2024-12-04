@@ -7,6 +7,8 @@ import { RequestError } from '@octokit/request-error'
 import type { EndpointDefaults } from '@octokit/types'
 import { MapPrinter } from './utils.js'
 import humanInterval from 'human-interval'
+import { graphql } from '@octokit/graphql'
+import { Repository } from '@octokit/graphql-schema'
 
 // @ts-expect-error: esm errror
 const MyOctokit = Octokit.plugin(requestLog, throttling, retry)
@@ -42,6 +44,7 @@ export class Config {
   useRegex?: boolean
   token: string
   octokit: any
+  graphql: typeof graphql
 
   constructor(token: string) {
     this.token = token
@@ -100,6 +103,13 @@ export class Config {
         }
       }
     })
+
+    //
+    this.graphql = graphql.defaults({
+      headers: {
+        authorization: `token ${this.token}`
+      }
+    })
   }
 
   async init(): Promise<void> {
@@ -123,6 +133,24 @@ export class Config {
       // rethrow the error
       throw error
     }
+
+    // test graphql
+    const { repository } = await graphql<{ repository: Repository }>(
+      `
+        {
+          repository(owner: ${this.owner}, name: ${this.repository}) {
+            issues(last: 3) {
+              edges {
+                node {
+                  title
+                }
+              }
+            }
+          }
+        }
+      `
+    )
+    console.log(repository)
   }
 }
 

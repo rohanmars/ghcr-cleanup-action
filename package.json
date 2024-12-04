@@ -72,6 +72,8 @@
     "@octokit/plugin-throttling": "^9.3.2",
     "@octokit/request-error": "^5.1.0",
     "@octokit/rest": "^21.0.2",
+    "@octokit/graphql": "^8.1.1",
+    "@octokit/graphql-schema": "^15.25.0",
     "@octokit/auth-token": "v5.1.1",
     "axios": "^1.7.8",
     "axios-retry": "^4.4.2",
