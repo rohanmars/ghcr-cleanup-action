@@ -608,47 +608,49 @@ export class CleanupTask {
               if (ghPackage.metadata.container.tags.length === 1) {
                 standardTags.add(tag)
               } else {
-                core.info(`${tag}`)
                 // get the package
                 const manifest = await this.registry.getManifestByTag(tag)
+                if (manifest) {
+                  core.info(`${tag}`)
 
-                // preform a "ghcr.io" image deletion
-                // as the registry doesn't support manifest deletion directly
-                // we instead assign the tag to a different manifest first
-                // then we delete it
+                  // preform a "ghcr.io" image deletion
+                  // as the registry doesn't support manifest deletion directly
+                  // we instead assign the tag to a different manifest first
+                  // then we delete it
 
-                // clone the manifest
-                const newManifest = JSON.parse(JSON.stringify(manifest))
+                  // clone the manifest
+                  const newManifest = JSON.parse(JSON.stringify(manifest))
 
-                // create a fake manifest to separate the tag
-                if (newManifest.manifests) {
-                  // a multi architecture image
-                  newManifest.manifests = []
-                  await this.registry.putManifest(tag, newManifest, true)
-                } else {
-                  newManifest.layers = []
-                  await this.registry.putManifest(tag, newManifest, false)
-                }
-
-                // reload package ids to find the new package id/digest
-                await this.packageRepo.loadPackages(this.targetPackage, false)
-
-                // reload the manifest
-                const untaggedDigest = this.packageRepo.getDigestByTag(tag)
-                if (untaggedDigest) {
-                  const id = this.packageRepo.getIdByDigest(untaggedDigest)
-                  if (id) {
-                    await this.packageRepo.deletePackageVersion(
-                      this.targetPackage,
-                      id,
-                      untaggedDigest,
-                      [tag]
-                    )
-                    this.statistics.numberImagesDeleted += 1
+                  // create a fake manifest to separate the tag
+                  if (newManifest.manifests) {
+                    // a multi architecture image
+                    newManifest.manifests = []
+                    await this.registry.putManifest(tag, newManifest, true)
                   } else {
-                    core.info(
-                      `couldn't find newly created package with digest ${untaggedDigest} to delete`
-                    )
+                    newManifest.layers = []
+                    await this.registry.putManifest(tag, newManifest, false)
+                  }
+
+                  // reload package ids to find the new package id/digest
+                  await this.packageRepo.loadPackages(this.targetPackage, false)
+
+                  // reload the manifest
+                  const untaggedDigest = this.packageRepo.getDigestByTag(tag)
+                  if (untaggedDigest) {
+                    const id = this.packageRepo.getIdByDigest(untaggedDigest)
+                    if (id) {
+                      await this.packageRepo.deletePackageVersion(
+                        this.targetPackage,
+                        id,
+                        untaggedDigest,
+                        [tag]
+                      )
+                      this.statistics.numberImagesDeleted += 1
+                    } else {
+                      core.info(
+                        `couldn't find newly created package with digest ${untaggedDigest} to delete`
+                      )
+                    }
                   }
                 }
               }

@@ -43896,17 +43896,29 @@ class Registry {
             return this.manifestCache.get(digest);
         }
         else {
-            const response = await this.axios.get(`/v2/${this.config.owner}/${this.targetPackage}/manifests/${digest}`, {
-                transformResponse: [
-                    data => {
-                        return data;
-                    }
-                ]
-            });
-            const obj = JSON.parse(response?.data);
-            // save it for later use
-            this.manifestCache.set(digest, obj);
-            return obj;
+            try {
+                const response = await this.axios.get(`/v2/${this.config.owner}/${this.targetPackage}/manifests/${digest}`, {
+                    transformResponse: [
+                        data => {
+                            return data;
+                        }
+                    ]
+                });
+                const obj = JSON.parse(response?.data);
+                // save it for later use
+                this.manifestCache.set(digest, obj);
+                return obj;
+            }
+            catch (error) {
+                if (axios_isAxiosError(error) &&
+                    error.response &&
+                    error.response?.status === 404) {
+                    return null;
+                }
+                else {
+                    throw error;
+                }
+            }
         }
     }
     /**
@@ -44530,37 +44542,39 @@ class CleanupTask {
                                 standardTags.add(tag);
                             }
                             else {
-                                core.info(`${tag}`);
                                 // get the package
                                 const manifest = await this.registry.getManifestByTag(tag);
-                                // preform a "ghcr.io" image deletion
-                                // as the registry doesn't support manifest deletion directly
-                                // we instead assign the tag to a different manifest first
-                                // then we delete it
-                                // clone the manifest
-                                const newManifest = JSON.parse(JSON.stringify(manifest));
-                                // create a fake manifest to separate the tag
-                                if (newManifest.manifests) {
-                                    // a multi architecture image
-                                    newManifest.manifests = [];
-                                    await this.registry.putManifest(tag, newManifest, true);
-                                }
-                                else {
-                                    newManifest.layers = [];
-                                    await this.registry.putManifest(tag, newManifest, false);
-                                }
-                                // reload package ids to find the new package id/digest
-                                await this.packageRepo.loadPackages(this.targetPackage, false);
-                                // reload the manifest
-                                const untaggedDigest = this.packageRepo.getDigestByTag(tag);
-                                if (untaggedDigest) {
-                                    const id = this.packageRepo.getIdByDigest(untaggedDigest);
-                                    if (id) {
-                                        await this.packageRepo.deletePackageVersion(this.targetPackage, id, untaggedDigest, [tag]);
-                                        this.statistics.numberImagesDeleted += 1;
+                                if (manifest) {
+                                    core.info(`${tag}`);
+                                    // preform a "ghcr.io" image deletion
+                                    // as the registry doesn't support manifest deletion directly
+                                    // we instead assign the tag to a different manifest first
+                                    // then we delete it
+                                    // clone the manifest
+                                    const newManifest = JSON.parse(JSON.stringify(manifest));
+                                    // create a fake manifest to separate the tag
+                                    if (newManifest.manifests) {
+                                        // a multi architecture image
+                                        newManifest.manifests = [];
+                                        await this.registry.putManifest(tag, newManifest, true);
                                     }
                                     else {
-                                        core.info(`couldn't find newly created package with digest ${untaggedDigest} to delete`);
+                                        newManifest.layers = [];
+                                        await this.registry.putManifest(tag, newManifest, false);
+                                    }
+                                    // reload package ids to find the new package id/digest
+                                    await this.packageRepo.loadPackages(this.targetPackage, false);
+                                    // reload the manifest
+                                    const untaggedDigest = this.packageRepo.getDigestByTag(tag);
+                                    if (untaggedDigest) {
+                                        const id = this.packageRepo.getIdByDigest(untaggedDigest);
+                                        if (id) {
+                                            await this.packageRepo.deletePackageVersion(this.targetPackage, id, untaggedDigest, [tag]);
+                                            this.statistics.numberImagesDeleted += 1;
+                                        }
+                                        else {
+                                            core.info(`couldn't find newly created package with digest ${untaggedDigest} to delete`);
+                                        }
                                     }
                                 }
                             }
