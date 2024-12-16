@@ -529,7 +529,7 @@ export class CleanupTask {
 
   async deleteByTag(): Promise<void> {
     if (this.config.deleteTags) {
-      const matchTags = []
+      const matchTags = new Set<string>()
       if (this.config.useRegex) {
         const regex = new RegExp(this.config.deleteTags)
         // build match list from filterSet
@@ -537,7 +537,7 @@ export class CleanupTask {
           const ghPackage = this.packageRepo.getPackageByDigest(digest)
           for (const tag of ghPackage.metadata.container.tags) {
             if (regex.test(tag)) {
-              matchTags.push(tag)
+              matchTags.add(tag)
             }
           }
         }
@@ -545,7 +545,7 @@ export class CleanupTask {
         for (const digest of this.filterSet) {
           if (regex.test(digest)) {
             // delete the tag from the filterSet
-            matchTags.push(digest)
+            matchTags.add(digest)
           }
         }
       } else {
@@ -556,18 +556,18 @@ export class CleanupTask {
           const ghPackage = this.packageRepo.getPackageByDigest(digest)
           for (const tag of ghPackage.metadata.container.tags) {
             if (isTagMatch(tag)) {
-              matchTags.push(tag)
+              matchTags.add(tag)
             }
           }
         }
         // now check for digest based format matches
         for (const digest of this.filterSet) {
           if (isTagMatch(digest)) {
-            matchTags.push(digest)
+            matchTags.add(digest)
           }
         }
       }
-      if (matchTags.length > 0) {
+      if (matchTags.size > 0) {
         // build seperate sets for the untagging events and the standard deletions
         const untaggingTags = new Set<string>()
         const standardTags = new Set<string>()
@@ -608,49 +608,49 @@ export class CleanupTask {
               if (ghPackage.metadata.container.tags.length === 1) {
                 standardTags.add(tag)
               } else {
+                core.info(`${tag}`)
+
                 // get the package
-                const manifest = await this.registry.getManifestByTag(tag)
-                if (manifest) {
-                  core.info(`${tag}`)
+                const manifest =
+                  await this.registry.getManifestByDigest(manifestDigest)
 
-                  // preform a "ghcr.io" image deletion
-                  // as the registry doesn't support manifest deletion directly
-                  // we instead assign the tag to a different manifest first
-                  // then we delete it
+                // preform a "ghcr.io" image deletion
+                // as the registry doesn't support manifest deletion directly
+                // we instead assign the tag to a different manifest first
+                // then we delete it
 
-                  // clone the manifest
-                  const newManifest = JSON.parse(JSON.stringify(manifest))
+                // clone the manifest
+                const newManifest = JSON.parse(JSON.stringify(manifest))
 
-                  // create a fake manifest to separate the tag
-                  if (newManifest.manifests) {
-                    // a multi architecture image
-                    newManifest.manifests = []
-                    await this.registry.putManifest(tag, newManifest, true)
+                // create a fake manifest to separate the tag
+                if (newManifest.manifests) {
+                  // a multi architecture image
+                  newManifest.manifests = []
+                  await this.registry.putManifest(tag, newManifest, true)
+                } else {
+                  newManifest.layers = []
+                  await this.registry.putManifest(tag, newManifest, false)
+                }
+
+                // reload package ids to find the new package id/digest
+                await this.packageRepo.loadPackages(this.targetPackage, false)
+
+                // reload the manifest
+                const untaggedDigest = this.packageRepo.getDigestByTag(tag)
+                if (untaggedDigest) {
+                  const id = this.packageRepo.getIdByDigest(untaggedDigest)
+                  if (id) {
+                    await this.packageRepo.deletePackageVersion(
+                      this.targetPackage,
+                      id,
+                      untaggedDigest,
+                      [tag]
+                    )
+                    this.statistics.numberImagesDeleted += 1
                   } else {
-                    newManifest.layers = []
-                    await this.registry.putManifest(tag, newManifest, false)
-                  }
-
-                  // reload package ids to find the new package id/digest
-                  await this.packageRepo.loadPackages(this.targetPackage, false)
-
-                  // reload the manifest
-                  const untaggedDigest = this.packageRepo.getDigestByTag(tag)
-                  if (untaggedDigest) {
-                    const id = this.packageRepo.getIdByDigest(untaggedDigest)
-                    if (id) {
-                      await this.packageRepo.deletePackageVersion(
-                        this.targetPackage,
-                        id,
-                        untaggedDigest,
-                        [tag]
-                      )
-                      this.statistics.numberImagesDeleted += 1
-                    } else {
-                      core.info(
-                        `couldn't find newly created package with digest ${untaggedDigest} to delete`
-                      )
-                    }
+                    core.info(
+                      `couldn't find newly created package with digest ${untaggedDigest} to delete`
+                    )
                   }
                 }
               }

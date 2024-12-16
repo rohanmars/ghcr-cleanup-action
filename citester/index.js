@@ -39107,40 +39107,56 @@ class PackageRepo {
      * @param label Additional label to display
      */
     async deletePackageVersion(targetPackage, id, digest, tags, label) {
-        if (tags && tags.length > 0) {
-            _actions_core__WEBPACK_IMPORTED_MODULE_0__.info(` deleting package id: ${id} digest: ${digest} tag: ${tags}`);
-        }
-        else if (label) {
-            _actions_core__WEBPACK_IMPORTED_MODULE_0__.info(` deleting package id: ${id} digest: ${digest} ${label}`);
-        }
-        else {
-            _actions_core__WEBPACK_IMPORTED_MODULE_0__.info(` deleting package id: ${id} digest: ${digest}`);
-        }
-        if (!this.config.dryRun) {
-            if (this.config.repoType === 'User') {
-                if (this.config.isPrivateRepo) {
-                    await this.config.octokit.rest.packages.deletePackageVersionForAuthenticatedUser({
-                        package_type: 'container',
-                        package_name: targetPackage,
-                        package_version_id: id
-                    });
+        try {
+            if (tags && tags.length > 0) {
+                _actions_core__WEBPACK_IMPORTED_MODULE_0__.info(` deleting package id: ${id} digest: ${digest} tag: ${tags}`);
+            }
+            else if (label) {
+                _actions_core__WEBPACK_IMPORTED_MODULE_0__.info(` deleting package id: ${id} digest: ${digest} ${label}`);
+            }
+            else {
+                _actions_core__WEBPACK_IMPORTED_MODULE_0__.info(` deleting package id: ${id} digest: ${digest}`);
+            }
+            if (!this.config.dryRun) {
+                if (this.config.repoType === 'User') {
+                    if (this.config.isPrivateRepo) {
+                        await this.config.octokit.rest.packages.deletePackageVersionForAuthenticatedUser({
+                            package_type: 'container',
+                            package_name: targetPackage,
+                            package_version_id: id
+                        });
+                    }
+                    else {
+                        await this.config.octokit.rest.packages.deletePackageVersionForUser({
+                            package_type: 'container',
+                            package_name: targetPackage,
+                            username: this.config.owner,
+                            package_version_id: id
+                        });
+                    }
                 }
                 else {
-                    await this.config.octokit.rest.packages.deletePackageVersionForUser({
+                    await this.config.octokit.rest.packages.deletePackageVersionForOrg({
                         package_type: 'container',
                         package_name: targetPackage,
-                        username: this.config.owner,
+                        org: this.config.owner,
                         package_version_id: id
                     });
                 }
             }
-            else {
-                await this.config.octokit.rest.packages.deletePackageVersionForOrg({
-                    package_type: 'container',
-                    package_name: targetPackage,
-                    org: this.config.owner,
-                    package_version_id: id
-                });
+        }
+        catch (error) {
+            let ignore = false;
+            if (error instanceof _octokit_request_error__WEBPACK_IMPORTED_MODULE_2__.RequestError) {
+                if (error.status) {
+                    if (error.status === 404) {
+                        ignore = true;
+                        _actions_core__WEBPACK_IMPORTED_MODULE_0__.warning(`The package "${targetPackage}" version:${id} wasn't found while trying to delete it, ignoring this error.`);
+                    }
+                }
+            }
+            if (!ignore) {
+                throw error;
             }
         }
     }
@@ -44636,29 +44652,17 @@ class Registry {
             return this.manifestCache.get(digest);
         }
         else {
-            try {
-                const response = await this.axios.get(`/v2/${this.config.owner}/${this.targetPackage}/manifests/${digest}`, {
-                    transformResponse: [
-                        data => {
-                            return data;
-                        }
-                    ]
-                });
-                const obj = JSON.parse(response?.data);
-                // save it for later use
-                this.manifestCache.set(digest, obj);
-                return obj;
-            }
-            catch (error) {
-                if (axios_isAxiosError(error) &&
-                    error.response &&
-                    error.response?.status === 404) {
-                    return null;
-                }
-                else {
-                    throw error;
-                }
-            }
+            const response = await this.axios.get(`/v2/${this.config.owner}/${this.targetPackage}/manifests/${digest}`, {
+                transformResponse: [
+                    data => {
+                        return data;
+                    }
+                ]
+            });
+            const obj = JSON.parse(response?.data);
+            // save it for later use
+            this.manifestCache.set(digest, obj);
+            return obj;
         }
     }
     /**

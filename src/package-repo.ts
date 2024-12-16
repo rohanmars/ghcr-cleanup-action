@@ -178,38 +178,57 @@ export class PackageRepo {
     tags?: string[],
     label?: string
   ): Promise<void> {
-    if (tags && tags.length > 0) {
-      core.info(` deleting package id: ${id} digest: ${digest} tag: ${tags}`)
-    } else if (label) {
-      core.info(` deleting package id: ${id} digest: ${digest} ${label}`)
-    } else {
-      core.info(` deleting package id: ${id} digest: ${digest}`)
-    }
-    if (!this.config.dryRun) {
-      if (this.config.repoType === 'User') {
-        if (this.config.isPrivateRepo) {
-          await this.config.octokit.rest.packages.deletePackageVersionForAuthenticatedUser(
-            {
-              package_type: 'container',
-              package_name: targetPackage,
-              package_version_id: id
-            }
-          )
+    try {
+      if (tags && tags.length > 0) {
+        core.info(` deleting package id: ${id} digest: ${digest} tag: ${tags}`)
+      } else if (label) {
+        core.info(` deleting package id: ${id} digest: ${digest} ${label}`)
+      } else {
+        core.info(` deleting package id: ${id} digest: ${digest}`)
+      }
+      if (!this.config.dryRun) {
+        if (this.config.repoType === 'User') {
+          if (this.config.isPrivateRepo) {
+            await this.config.octokit.rest.packages.deletePackageVersionForAuthenticatedUser(
+              {
+                package_type: 'container',
+                package_name: targetPackage,
+                package_version_id: id
+              }
+            )
+          } else {
+            await this.config.octokit.rest.packages.deletePackageVersionForUser(
+              {
+                package_type: 'container',
+                package_name: targetPackage,
+                username: this.config.owner,
+                package_version_id: id
+              }
+            )
+          }
         } else {
-          await this.config.octokit.rest.packages.deletePackageVersionForUser({
+          await this.config.octokit.rest.packages.deletePackageVersionForOrg({
             package_type: 'container',
             package_name: targetPackage,
-            username: this.config.owner,
+            org: this.config.owner,
             package_version_id: id
           })
         }
-      } else {
-        await this.config.octokit.rest.packages.deletePackageVersionForOrg({
-          package_type: 'container',
-          package_name: targetPackage,
-          org: this.config.owner,
-          package_version_id: id
-        })
+      }
+    } catch (error) {
+      let ignore = false
+      if (error instanceof RequestError) {
+        if (error.status) {
+          if (error.status === 404) {
+            ignore = true
+            core.warning(
+              `The package "${targetPackage}" version:${id} wasn't found while trying to delete it, ignoring this error.`
+            )
+          }
+        }
+      }
+      if (!ignore) {
+        throw error
       }
     }
   }

@@ -125,32 +125,20 @@ export class Registry {
     if (this.manifestCache.has(digest)) {
       return this.manifestCache.get(digest)
     } else {
-      try {
-        const response = await this.axios.get(
-          `/v2/${this.config.owner}/${this.targetPackage}/manifests/${digest}`,
-          {
-            transformResponse: [
-              data => {
-                return data
-              }
-            ]
-          }
-        )
-        const obj = JSON.parse(response?.data)
-        // save it for later use
-        this.manifestCache.set(digest, obj)
-        return obj
-      } catch (error) {
-        if (
-          isAxiosError(error) &&
-          error.response &&
-          error.response?.status === 404
-        ) {
-          return null
-        } else {
-          throw error
+      const response = await this.axios.get(
+        `/v2/${this.config.owner}/${this.targetPackage}/manifests/${digest}`,
+        {
+          transformResponse: [
+            data => {
+              return data
+            }
+          ]
         }
-      }
+      )
+      const obj = JSON.parse(response?.data)
+      // save it for later use
+      this.manifestCache.set(digest, obj)
+      return obj
     }
   }
 
