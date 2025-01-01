@@ -51,13 +51,13 @@ export class Config {
   }
 
   async init(): Promise<void> {
-    let baseUrl = 'https://api.github.com'
+    let githubUrl = 'https://api.github.com'
     if (this.githubApiUrl) {
-      baseUrl = this.githubApiUrl
+      githubUrl = this.githubApiUrl
     }
     this.octokit = new MyOctokit({
       auth: this.token,
-      baseUrl: baseUrl,
+      baseUrl: githubUrl,
       throttle: {
         onRateLimit: (
           retryAfter: number,

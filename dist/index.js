@@ -37808,13 +37808,13 @@ class Config {
         this.logLevel = LogLevel.INFO;
     }
     async init() {
-        let baseUrl = 'https://api.github.com';
+        let githubUrl = 'https://api.github.com';
         if (this.githubApiUrl) {
-            baseUrl = this.githubApiUrl;
+            githubUrl = this.githubApiUrl;
         }
         this.octokit = new MyOctokit({
             auth: this.token,
-            baseUrl: baseUrl,
+            baseUrl: githubUrl,
             throttle: {
                 onRateLimit: (retryAfter, options, octokit, retryCount) => {
                     core.info(`Octokit - request quota exhausted for request ${options.method} ${options.url}`);
