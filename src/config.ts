@@ -48,9 +48,16 @@ export class Config {
   constructor(token: string) {
     this.token = token
     this.logLevel = LogLevel.INFO
+  }
 
+  async init(): Promise<void> {
+    let baseUrl = 'https://api.github.com'
+    if (this.githubApiUrl) {
+      baseUrl = this.githubApiUrl
+    }
     this.octokit = new MyOctokit({
-      auth: token,
+      auth: this.token,
+      baseUrl: baseUrl,
       throttle: {
         onRateLimit: (
           retryAfter: number,
@@ -102,9 +109,7 @@ export class Config {
         }
       }
     })
-  }
 
-  async init(): Promise<void> {
     // lookup repo info
     try {
       const result = await this.octokit.request(

@@ -67,6 +67,7 @@ jobs:
             purpose: 'Removes all untagged images (multi arch)'
             folder: '1b_multi-untagged'
             registry-url: 'https://ghcr.io'
+            github-api-url: 'https://api.github.com'
 
           - title: '2a - Single: Tagged'
             purpose: 'Removes images with specific tag (single arch)'
@@ -270,6 +271,11 @@ jobs:
             REGISTRY_URL="${{ matrix.tests.registry-url }}"
           fi
 
+          GITHUB_API_URL=""
+          if [ -n "${{ matrix.tests.github-api-url }}" ]; then
+            GITHUB_API_URL="${{ matrix.tests.github-api-url }}"
+          fi
+
           DELAY="0"
           if [ -n "$KEEP_N_TAGGED" ] || [ -n "$KEEP_N_UNTAGGED" ]; then
             DELAY="3000"
@@ -287,6 +293,7 @@ jobs:
             echo "DRY_RUN=$DRY_RUN";
             echo "USE_REGEX=$USE_REGEX";
             echo "REGISTRY_URL=$REGISTRY_URL";
+            echo "GITHUB_API_URL=$GITHUB_API_URL";
             echo "VALIDATE=$VALIDATE";
             echo "DELAY=$DELAY"; } >> "$GITHUB_ENV"
 
@@ -313,6 +320,7 @@ jobs:
           validate: ${{ env.VALIDATE }}
           log-level: info
           registry-url: ${{ env.REGISTRY_URL }}
+          github-api-url: ${{ env.GITHUB_API_URL }}
 
       - name: ' > Validating Outcome'
         run: |

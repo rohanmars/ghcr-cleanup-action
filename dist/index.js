@@ -37806,8 +37806,15 @@ class Config {
     constructor(token) {
         this.token = token;
         this.logLevel = LogLevel.INFO;
+    }
+    async init() {
+        let baseUrl = 'https://api.github.com';
+        if (this.githubApiUrl) {
+            baseUrl = this.githubApiUrl;
+        }
         this.octokit = new MyOctokit({
-            auth: token,
+            auth: this.token,
+            baseUrl: baseUrl,
             throttle: {
                 onRateLimit: (retryAfter, options, octokit, retryCount) => {
                     core.info(`Octokit - request quota exhausted for request ${options.method} ${options.url}`);
@@ -37845,8 +37852,6 @@ class Config {
                 }
             }
         });
-    }
-    async init() {
         // lookup repo info
         try {
             const result = await this.octokit.request(`GET /repos/${this.owner}/${this.repository}`);
