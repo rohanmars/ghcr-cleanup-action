@@ -267,7 +267,7 @@ jobs:
 
           REGISTRY_URL=""
           if [ -n "${{ matrix.tests.registry-url }}" ]; then
-            REGISTR_URL="${{ matrix.tests.registry-url }}"
+            REGISTRY_URL="${{ matrix.tests.registry-url }}"
           fi
 
           DELAY="0"
