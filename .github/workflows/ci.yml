@@ -66,6 +66,7 @@ jobs:
           - title: '1b - Multi: Untagged'
             purpose: 'Removes all untagged images (multi arch)'
             folder: '1b_multi-untagged'
+            registry-url: 'https://ghcr.io'
 
           - title: '2a - Single: Tagged'
             purpose: 'Removes images with specific tag (single arch)'
@@ -264,6 +265,11 @@ jobs:
             VALIDATE="${{ matrix.tests.validate }}"
           fi
 
+          REGISTRY_URL=""
+          if [ -n "${{ matrix.tests.registry-url }}" ]; then
+            REGISTR_UURL="${{ matrix.tests.registry-url }}"
+          fi
+
           DELAY="0"
           if [ -n "$KEEP_N_TAGGED" ] || [ -n "$KEEP_N_UNTAGGED" ]; then
             DELAY="3000"
@@ -280,6 +286,7 @@ jobs:
             echo "OLDER_THAN=$OLDER_THAN";
             echo "DRY_RUN=$DRY_RUN";
             echo "USE_REGEX=$USE_REGEX";
+            echo "REGISTRY_URL=$REGISTRY_URL";
             echo "VALIDATE=$VALIDATE";
             echo "DELAY=$DELAY"; } >> "$GITHUB_ENV"
 
@@ -305,6 +312,7 @@ jobs:
           use-regex: ${{ env.USE_REGEX }}
           validate: ${{ env.VALIDATE }}
           log-level: info
+          registry-url: ${{ env.REGISTRY_URL }}
 
       - name: ' > Validating Outcome'
         run: |

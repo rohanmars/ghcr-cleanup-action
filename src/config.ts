@@ -41,6 +41,8 @@ export class Config {
   logLevel: LogLevel
   useRegex?: boolean
   token: string
+  registryUrl?: string
+  githubApiUrl?: string
   octokit: any
 
   constructor(token: string) {
@@ -287,6 +289,16 @@ export function buildConfig(): Config {
     config.useRegex = core.getBooleanInput('use-regex')
   }
 
+  if (core.getInput('registry-url')) {
+    config.registryUrl = core.getInput('registry-url')
+  }
+  if (core.getInput('github-api-url')) {
+    config.githubApiUrl = core.getInput('github-api-url')
+    if (!config.githubApiUrl.endsWith('/')) {
+      config.githubApiUrl += '/'
+    }
+  }
+
   if (!config.owner) {
     throw new Error('owner is not set')
   }
@@ -348,6 +360,13 @@ export function buildConfig(): Config {
 
   if (config.useRegex !== undefined) {
     optionsMap.add('use-regex', `${config.useRegex}`)
+  }
+
+  if (config.registryUrl !== undefined) {
+    optionsMap.add('registry-url', `${config.registryUrl}`)
+  }
+  if (config.githubApiUrl !== undefined) {
+    optionsMap.add('github-api-url', `${config.githubApiUrl}`)
   }
 
   core.startGroup('Runtime configuration')
