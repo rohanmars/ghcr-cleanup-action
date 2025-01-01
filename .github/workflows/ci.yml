@@ -318,7 +318,7 @@ jobs:
           dry-run: ${{ env.DRY_RUN }}
           use-regex: ${{ env.USE_REGEX }}
           validate: ${{ env.VALIDATE }}
-          log-level: info
+          log-level: debug
           registry-url: ${{ env.REGISTRY_URL }}
           github-api-url: ${{ env.GITHUB_API_URL }}
 
