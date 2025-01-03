@@ -37926,6 +37926,8 @@ class PackageRepo {
     id2Package = new Map();
     // Map of tags to digests
     tag2Digest = new Map();
+    // the result state of the last delete package
+    lastDeleteResult = true;
     /**
      * Constructor
      *
@@ -38100,6 +38102,7 @@ class PackageRepo {
                         package_version_id: id
                     });
                 }
+                this.lastDeleteResult = true;
             }
         }
         catch (error) {
@@ -38107,10 +38110,12 @@ class PackageRepo {
             if (error instanceof dist_node.RequestError) {
                 if (error.status) {
                     // ignore 404's, seen these after a 502 error. whereby the first delete causes a 502 but it really
-                    // deleted the package version, the retry then tries again and gets a 404
-                    if (error.status === 404) {
+                    // deleted the package version, the retry then tries again and returns a 404
+                    // only disregard 404 if that last call was successful - repeating 404s will fail action
+                    if (error.status === 404 && this.lastDeleteResult === true) {
                         ignoreError = true;
                         core.warning(`The package "${targetPackage}" version:${id} wasn't found while trying to delete it, something went wrong and ignoring this error.`);
+                        this.lastDeleteResult = false;
                     }
                 }
             }
