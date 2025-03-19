@@ -108,6 +108,7 @@ jobs:
         with:
           validate: true
           exclude-tags: ^\d+\.\d+\.\d+$
+          use-regex: true
           keep-n-tagged: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
