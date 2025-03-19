@@ -74,20 +74,20 @@ jobs:
       - name: Create builder
         run: docker buildx create --name mybuilder --use --bootstrap
 
-      - name: Build multi-platform image 1.0.0-rc1
-        run:
-          docker buildx build --cache-to
-          "type=registry,ref=$IMAGE-cache:latest,mode=max" --cache-from
-          "type=registry,ref=$IMAGE-cache:latest" --platform
-          linux/amd64,linux/arm64 --push -t "$IMAGE:1.0.0-rc1"
-          tests/shared-images-tagged
-
-      - name: Build multi-platform 1.0.0
+      - name: Build multi-platform image 1.0.0
         run:
           docker buildx build --cache-to
           "type=registry,ref=$IMAGE-cache:latest,mode=max" --cache-from
           "type=registry,ref=$IMAGE-cache:latest" --platform
           linux/amd64,linux/arm64 --push -t "$IMAGE:1.0.0"
+          tests/shared-images-tagged
+
+      - name: Build multi-platform 1.0.0-rc1
+        run:
+          docker buildx build --cache-to
+          "type=registry,ref=$IMAGE-cache:latest,mode=max" --cache-from
+          "type=registry,ref=$IMAGE-cache:latest" --platform
+          linux/amd64,linux/arm64 --push -t "$IMAGE:1.0.0-rc1"
           tests/shared-images-tagged
 
       - name: Build multi-platform 1.0.0, caused untagged
