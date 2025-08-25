@@ -44474,6 +44474,7 @@ class CleanupAction {
     async run() {
         // post initialize configuration
         await this.config.init();
+        const startedAt = Date.now();
         let targetPackages = [];
         if (this.config.expandPackages) {
             // first make sure sure we have PAT
@@ -44510,15 +44511,124 @@ class CleanupAction {
             core.endGroup();
         }
         let globalStatistics = new CleanupTaskStatistics('combined-action', 0, 0);
+        const perPackageStats = [];
         for (const targetPackage of targetPackages) {
             const cleanupTask = new CleanupTask(this.config, targetPackage);
             await cleanupTask.init();
             await cleanupTask.reload();
-            globalStatistics = globalStatistics.add(await cleanupTask.run());
+            const stats = await cleanupTask.run();
+            perPackageStats.push(stats);
+            globalStatistics = globalStatistics.add(stats);
         }
         if (targetPackages.length > 1) {
             globalStatistics.print();
         }
+        const durationMs = Date.now() - startedAt;
+        await this.writeJobSummary(targetPackages, perPackageStats, globalStatistics, durationMs);
+    }
+    async writeJobSummary(targetPackages, perPackageStats, globalStats, durationMs) {
+        const summary = core.summary;
+        // Header
+        summary.addHeading('🧹 GHCR Cleanup Summary');
+        // Mode/dry-run notice
+        if (this.config.dryRun) {
+            summary.addRaw('> Dry run enabled: No packages were actually deleted.', true);
+        }
+        // Quick stats
+        summary.addHeading('Overview', 2);
+        summary.addTable([
+            [
+                { data: 'Metric', header: true },
+                { data: 'Value', header: true }
+            ],
+            ['Packages processed', `${targetPackages.length}`],
+            ['Total images deleted', `${globalStats.numberImagesDeleted}`],
+            ['Multi-arch images deleted', `${globalStats.numberMultiImagesDeleted}`],
+            ['Mode', this.config.dryRun ? 'Dry run' : 'Live'],
+            ['Duration', `${Math.round(durationMs / 1000)}s`]
+        ]);
+        // Configuration overview
+        const configPairs = [];
+        configPairs.push(['owner', `${this.config.owner}`]);
+        configPairs.push(['repository', `${this.config.repository}`]);
+        configPairs.push(['packages', `${targetPackages.join(', ')}`]);
+        if (this.config.deleteTags !== undefined) {
+            configPairs.push(['delete-tags', `${this.config.deleteTags}`]);
+        }
+        if (this.config.excludeTags) {
+            configPairs.push(['exclude-tags', `${this.config.excludeTags}`]);
+        }
+        if (this.config.olderThanReadable) {
+            configPairs.push(['older-than', `${this.config.olderThanReadable}`]);
+        }
+        if (this.config.keepNtagged !== undefined) {
+            configPairs.push(['keep-n-tagged', `${this.config.keepNtagged}`]);
+        }
+        if (this.config.keepNuntagged !== undefined) {
+            configPairs.push(['keep-n-untagged', `${this.config.keepNuntagged}`]);
+        }
+        if (this.config.deleteUntagged !== undefined) {
+            configPairs.push(['delete-untagged', `${this.config.deleteUntagged}`]);
+        }
+        if (this.config.deleteGhostImages !== undefined) {
+            configPairs.push([
+                'delete-ghost-images',
+                `${this.config.deleteGhostImages}`
+            ]);
+        }
+        if (this.config.deletePartialImages !== undefined) {
+            configPairs.push([
+                'delete-partial-images',
+                `${this.config.deletePartialImages}`
+            ]);
+        }
+        if (this.config.deleteOrphanedImages !== undefined) {
+            configPairs.push([
+                'delete-orphaned-images',
+                `${this.config.deleteOrphanedImages}`
+            ]);
+        }
+        if (this.config.validate !== undefined) {
+            configPairs.push(['validate', `${this.config.validate}`]);
+        }
+        if (this.config.useRegex !== undefined) {
+            configPairs.push(['use-regex', `${this.config.useRegex}`]);
+        }
+        configPairs.push(['log-level', `${this.config.logLevel}`]);
+        // Build an HTML table so it renders correctly inside <details>
+        const buildHtmlTable = (headers, rows) => {
+            const thead = `<tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr>`;
+            const tbody = rows
+                .map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`)
+                .join('');
+            return `<table>${thead}${tbody}</table>`;
+        };
+        const configTableHtml = buildHtmlTable(['Key', 'Value'], configPairs.map(([k, v]) => [k, v]));
+        summary.addDetails('Configuration', configTableHtml);
+        // Results per package
+        summary.addHeading('Results', 2);
+        const resultRows = [
+            [
+                { data: 'Package', header: true },
+                { data: 'Total Deleted', header: true },
+                { data: 'Multi-arch Deleted', header: true }
+            ]
+        ];
+        for (const stats of perPackageStats) {
+            resultRows.push([
+                stats.name,
+                `${stats.numberImagesDeleted}`,
+                `${stats.numberMultiImagesDeleted}`
+            ]);
+        }
+        // Totals row
+        resultRows.push([
+            { data: 'Total', header: true },
+            `${globalStats.numberImagesDeleted}`,
+            `${globalStats.numberMultiImagesDeleted}`
+        ]);
+        summary.addTable(resultRows);
+        await summary.write();
     }
 }
 
