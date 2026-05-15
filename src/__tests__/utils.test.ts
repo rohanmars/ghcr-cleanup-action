@@ -11,7 +11,9 @@ import {
   parseChallenge,
   isValidChallenge,
   MapPrinter,
-  CleanupTaskStatistics
+  CleanupTaskStatistics,
+  parentDigestFromReferrerTag,
+  SHA256_DIGEST_LENGTH
 } from '../utils'
 
 // Mock @actions/core
@@ -77,6 +79,50 @@ describe('utils', () => {
 
       expect(result.get('key1')).toBe('')
       expect(result.get('key2')).toBe('value')
+    })
+
+    it('should preserve = characters inside values', () => {
+      // base64-encoded scopes can contain = padding; the parser must only
+      // split on the first =, not every =.
+      const challenge =
+        'Bearer realm="https://ghcr.io/token",service="ghcr.io",scope="repository:user/test:pull=encoded=="'
+      const result = parseChallenge(challenge)
+
+      expect(result.get('scope')).toBe('repository:user/test:pull=encoded==')
+    })
+  })
+
+  describe('parentDigestFromReferrerTag', () => {
+    const fullDigest = `sha256:${'a'.repeat(64)}`
+    const referrerHex = 'a'.repeat(64)
+
+    it('extracts the parent digest from a cosign signature tag', () => {
+      const tag = `sha256-${referrerHex}.sig`
+      expect(parentDigestFromReferrerTag(tag)).toBe(fullDigest)
+    })
+
+    it('extracts the parent digest from an attestation tag', () => {
+      const tag = `sha256-${referrerHex}.att`
+      expect(parentDigestFromReferrerTag(tag)).toBe(fullDigest)
+    })
+
+    it('handles a bare sha256-<hex> tag with no suffix', () => {
+      const tag = `sha256-${referrerHex}`
+      expect(parentDigestFromReferrerTag(tag)).toBe(fullDigest)
+    })
+
+    it('returns null for tags without the sha256- prefix', () => {
+      expect(parentDigestFromReferrerTag('latest')).toBeNull()
+      expect(parentDigestFromReferrerTag('v1.0.0')).toBeNull()
+    })
+
+    it('returns null for malformed short referrer tags', () => {
+      // Too short to be a real digest — should not produce a half-valid lookup
+      expect(parentDigestFromReferrerTag('sha256-abc')).toBeNull()
+    })
+
+    it('SHA256_DIGEST_LENGTH is 71', () => {
+      expect(SHA256_DIGEST_LENGTH).toBe(71)
     })
   })
 

@@ -9,6 +9,7 @@ import {
   type MockedClass
 } from 'vitest'
 import * as core from '@actions/core'
+import humanInterval from 'human-interval'
 import { Config, LogLevel, buildConfig } from '../config'
 import { OctokitClient } from '../octokit-client'
 
@@ -390,7 +391,48 @@ describe('Config', () => {
       })
 
       await expect(buildConfig()).rejects.toThrow(
-        'delete-untagged and keep-n-untagged can not be set at the same time'
+        'delete-untagged and keep-n-untagged cannot be set at the same time'
+      )
+    })
+
+    it('should throw when keep-n-untagged is 0 and delete-untagged is set', async () => {
+      // Regression: previously `if (config.keepNuntagged && ...)` short-circuited
+      // on 0, so this contradictory config was silently accepted.
+      process.env.GITHUB_REPOSITORY = 'test-owner/test-repo'
+      mockGetInput.mockImplementation((name: string) => {
+        const inputs: Record<string, string> = {
+          token: 'test-token',
+          'delete-untagged': 'true',
+          'keep-n-untagged': '0'
+        }
+        return inputs[name] || ''
+      })
+      mockGetBooleanInput.mockImplementation((name: string) => {
+        return name === 'delete-untagged'
+      })
+
+      await expect(buildConfig()).rejects.toThrow(
+        'delete-untagged and keep-n-untagged cannot be set at the same time'
+      )
+    })
+
+    it('should throw when older-than cannot be parsed', async () => {
+      // Regression: humanInterval returns undefined for unparsable strings;
+      // the validator must treat that as fatal rather than silently skipping
+      // the age filter.
+      process.env.GITHUB_REPOSITORY = 'test-owner/test-repo'
+      const mockHumanInterval = vi.mocked(humanInterval)
+      mockHumanInterval.mockReturnValueOnce(undefined)
+      mockGetInput.mockImplementation((name: string) => {
+        const inputs: Record<string, string> = {
+          token: 'test-token',
+          'older-than': 'gibberish'
+        }
+        return inputs[name] || ''
+      })
+
+      await expect(buildConfig()).rejects.toThrow(
+        /older-than value "gibberish" is not a valid interval/
       )
     })
   })

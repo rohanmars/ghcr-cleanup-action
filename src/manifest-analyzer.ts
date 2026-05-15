@@ -31,9 +31,9 @@ export class ManifestAnalyzer {
       } else {
         // Output a status message if 3 seconds has passed
         const now = new Date()
-        if (now.getMilliseconds() - stopWatch.getMilliseconds() >= 3000) {
+        if (now.getTime() - stopWatch.getTime() >= 3000) {
           core.info(`loaded ${processed} of ${digestCount} manifests`)
-          stopWatch = new Date() // Reset the clock
+          stopWatch = now // Reset the clock
         }
       }
 

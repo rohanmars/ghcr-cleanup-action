@@ -112,7 +112,10 @@ export async function buildConfig(): Promise<Config> {
     // save the text version of it
     config.olderThanReadable = core.getInput('older-than')
 
-    if (config.olderThan != null && isNaN(config.olderThan)) {
+    // humanInterval returns undefined for unparsable strings and NaN for
+    // partially-parsed ones. Both must be treated as fatal — otherwise the
+    // filter is silently skipped at runtime.
+    if (config.olderThan == null || isNaN(config.olderThan)) {
       // check if it has an interval type
       const regexp = /(second|minute|hour|day|week|month|year)s?/
       const match = config.olderThanReadable.match(regexp)
@@ -167,9 +170,9 @@ export async function buildConfig(): Promise<Config> {
     }
   }
 
-  if (config.keepNuntagged && core.getInput('delete-untagged')) {
+  if (config.keepNuntagged != null && core.getInput('delete-untagged')) {
     throw new Error(
-      'delete-untagged and keep-n-untagged can not be set at the same time'
+      'delete-untagged and keep-n-untagged cannot be set at the same time'
     )
   }
 
