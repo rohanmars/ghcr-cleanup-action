@@ -162,6 +162,37 @@ jobs:
             folder: '7c_multi-untagging'
             delete-tags: tag2,tag3
 
+          - title:
+              '7d - delete-tags + keep-n-tagged + older-than spares multi-tagged
+              images from untag-before-gate'
+            purpose:
+              'keep-n-tagged must gate the untag path: a multi-tagged image
+              whose tag matches delete-tags must not be stripped of that tag if
+              the image is in the keep set. older-than is included to mirror the
+              exact option combination reported in upstream issue #99 (all
+              primed images are well over 1 second old by the time the action
+              runs, so the age filter is innocuous — its presence should not
+              change the keep/untag decision).'
+            folder: '7d_delete-tags-keepn-untag-gate'
+            delete-tags: '^v1\.\d+$'
+            keep-n-tagged: 2
+            older-than: 1 second
+            use-regex: true
+
+          - title:
+              '7e - Multi: delete-tags + keep-n-tagged gates untag for in-set
+              images and lets untag proceed for out-of-set images'
+            purpose:
+              'Multi-arch coverage of the keep-n-tagged + delete-tags
+              interaction. An image in the keep set must not have its matched
+              tag stripped (gating); an image NOT in the keep set must still get
+              its matched tag untagged (positive untag path). Also exercises the
+              per-image keep-set dedup when matched tags span multiple images.'
+            folder: '7e_multi-delete-tags-keepn-gating'
+            delete-tags: '^(beta|legacy|old)$'
+            keep-n-tagged: 1
+            use-regex: true
+
           - title: '8a - Multi: Complex'
             purpose: 'Complex combined Test (multi arch)'
             folder: '8a_multi-complex'

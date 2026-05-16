@@ -97,6 +97,20 @@ export class CleanupOrchestrator {
         this.excludeTags
       )
 
+      // When keep-n-tagged is set, gate the untag operations: any image that
+      // keep-n-tagged would protect must not be partially untagged here.
+      // Otherwise multi-tagged images in the keep set get a matched tag
+      // stripped before keep-n-tagged runs, defeating its protection. See
+      // FINDINGS.md #10 / upstream issues #99 and #101.
+      if (this.config.keepNtagged != null && plan.untagOperations.size > 0) {
+        const keepSet = this.deletionStrategy.computeKeepNTaggedDigests(
+          this.filterSet
+        )
+        for (const digest of keepSet) {
+          plan.untagOperations.delete(digest)
+        }
+      }
+
       // Perform untagging if needed
       let reloadOccurred = false
       if (plan.untagOperations.size > 0 && this.imageDeleter) {
