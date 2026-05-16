@@ -538,37 +538,56 @@ jobs:
           node citester/index.js --token "$GH_TOKEN" --directory \
             tests/shared-images-tagged --mode prime
 
-      - name: Create builder
-        run: docker buildx create --name mybuilder --use --bootstrap
+      # Construct two index manifests in ghcr that *deterministically* share
+      # platform manifest children, so the parent-tracking code in
+      # manifest-analyzer.ts:loadDigestUsedByMap is forced through the shared-
+      # child path. Using buildx --cache-from for this was unreliable because
+      # buildx provenance/timestamp metadata can vary between runs, causing
+      # supposedly-identical platform manifests to get distinct digests.
+      #
+      # Approach: pull busybox's existing per-platform manifests from
+      # mirror.gcr.io (deterministic content-addressed digests) and use
+      # `docker buildx imagetools create` to compose two distinct indexes
+      # both pointing at the same children. image1 = [amd64, arm64];
+      # image2 = [amd64, arm64, 386] — different child set guarantees
+      # different index digests without relying on buildx annotation support.
+      - name: Compose shared-platform indexes via busybox
+        run: |
+          set -euo pipefail
+          RAW=$(docker buildx imagetools inspect --raw mirror.gcr.io/library/busybox:1.36)
+          AMD64=$(echo "$RAW" | jq -r '.manifests[] | select(.platform.architecture=="amd64" and ((.platform.variant // "") == "")) | .digest')
+          ARM64=$(echo "$RAW" | jq -r '.manifests[] | select(.platform.architecture=="arm64") | .digest')
+          I386=$(echo "$RAW" | jq -r '.manifests[] | select(.platform.architecture=="386") | .digest')
+          echo "amd64=$AMD64"
+          echo "arm64=$ARM64"
+          echo "386=$I386"
+          # image1: two platforms shared with image2
+          docker buildx imagetools create --tag "$IMAGE:image1" \
+            "mirror.gcr.io/library/busybox@$AMD64" \
+            "mirror.gcr.io/library/busybox@$ARM64"
+          # image2: three platforms — amd64 & arm64 shared with image1, 386 unique
+          docker buildx imagetools create --tag "$IMAGE:image2" \
+            "mirror.gcr.io/library/busybox@$AMD64" \
+            "mirror.gcr.io/library/busybox@$ARM64" \
+            "mirror.gcr.io/library/busybox@$I386"
 
-      - name: Build multi-platform image1
-        run:
-          docker buildx build --cache-to
-          "type=registry,ref=$IMAGE-cache:latest,mode=max" --cache-from
-          "type=registry,ref=$IMAGE-cache:latest" --platform
-          linux/amd64,linux/arm64 --push -t "$IMAGE:image1"
-          tests/shared-images-tagged
-
-      - name: Build multi-platform image2
-        run:
-          docker buildx build --cache-to
-          "type=registry,ref=$IMAGE-cache:latest,mode=max" --cache-from
-          "type=registry,ref=$IMAGE-cache:latest" --platform
-          linux/amd64,linux/arm64 --push -t "$IMAGE:image2"
-          tests/shared-images-tagged
-
+      # Save image1's index + children as the "must survive" set. image1 is
+      # iterated SECOND by manifest-analyzer (ghcr API returns created_at
+      # DESC), so when we delete image2 below the shared children's recorded
+      # parent set is {image2} — bug deletes them; correct behavior leaves
+      # them for image1.
       - name: Save Digests - Shared Images Tagged Test
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           node citester/index.js --token "$GH_TOKEN" --directory \
-            tests/shared-images-tagged --mode save-expected --tag image2
+            tests/shared-images-tagged --mode save-expected --tag image1
 
       - name: Run Test - Shared Images Tagged Test
         uses: ./
         with:
           validate: true
-          delete-tags: image1
+          delete-tags: image2
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Validate Test Results - Shared Images Tagged Test

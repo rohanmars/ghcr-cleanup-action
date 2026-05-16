@@ -78,12 +78,11 @@ describe('ManifestAnalyzer', () => {
       expect(map.get(childArm)).toEqual(new Set([parent]))
     })
 
-    it('records only the first parent when a child is shared (current behavior)', async () => {
-      // NOTE: this documents a latent bug — see FINDINGS.md #19.
-      // The implementation deletes the child from the iteration set on first
-      // encounter, so a second parent referencing the same child is never
-      // recorded. Affects multi-parent cascade-delete safety in rare cases
-      // where two indexes share an identical platform digest.
+    it('records all parents when a child is shared between two indexes', async () => {
+      // Regression for FINDINGS.md #19: previously the code removed the
+      // child from the iteration set on first encounter, so the second
+      // parent never registered itself — causing cascade-delete to wrongly
+      // treat shared children as single-parent.
       const parentA = 'sha256:parentA'
       const parentB = 'sha256:parentB'
       const sharedChild = 'sha256:shared'
@@ -101,8 +100,80 @@ describe('ManifestAnalyzer', () => {
 
       const map = await analyzer.loadDigestUsedByMap()
 
-      // Only one parent gets recorded; ideally this would be Set([parentA, parentB]).
-      expect(map.get(sharedChild)?.size).toBe(1)
+      expect(map.get(sharedChild)).toEqual(new Set([parentA, parentB]))
+    })
+
+    it('records all parents regardless of iteration order', async () => {
+      // Same scenario as above but parents inserted in reverse order.
+      const parentA = 'sha256:parentA'
+      const parentB = 'sha256:parentB'
+      const sharedChild = 'sha256:shared'
+      mockPackageRepo.getDigests.mockReturnValue(
+        new Set([parentB, parentA, sharedChild])
+      )
+      mockRegistry.getManifestByDigest.mockImplementation(
+        async (digest: string) => {
+          if (digest === parentA || digest === parentB) {
+            return { manifests: [{ digest: sharedChild }] }
+          }
+          return { layers: [] }
+        }
+      )
+
+      const map = await analyzer.loadDigestUsedByMap()
+
+      expect(map.get(sharedChild)).toEqual(new Set([parentA, parentB]))
+    })
+
+    it('records all parents when three indexes share the same child', async () => {
+      const parentA = 'sha256:parentA'
+      const parentB = 'sha256:parentB'
+      const parentC = 'sha256:parentC'
+      const sharedChild = 'sha256:shared'
+      mockPackageRepo.getDigests.mockReturnValue(
+        new Set([parentA, parentB, parentC, sharedChild])
+      )
+      mockRegistry.getManifestByDigest.mockImplementation(
+        async (digest: string) => {
+          if (digest === parentA || digest === parentB || digest === parentC) {
+            return { manifests: [{ digest: sharedChild }] }
+          }
+          return { layers: [] }
+        }
+      )
+
+      const map = await analyzer.loadDigestUsedByMap()
+
+      expect(map.get(sharedChild)).toEqual(new Set([parentA, parentB, parentC]))
+    })
+
+    it('handles overlapping child sets (one shared child, one dedicated child each)', async () => {
+      // image1 = [shared, onlyA]; image2 = [shared, onlyB]
+      const parentA = 'sha256:parentA'
+      const parentB = 'sha256:parentB'
+      const shared = 'sha256:shared'
+      const onlyA = 'sha256:onlyA'
+      const onlyB = 'sha256:onlyB'
+      mockPackageRepo.getDigests.mockReturnValue(
+        new Set([parentA, parentB, shared, onlyA, onlyB])
+      )
+      mockRegistry.getManifestByDigest.mockImplementation(
+        async (digest: string) => {
+          if (digest === parentA) {
+            return { manifests: [{ digest: shared }, { digest: onlyA }] }
+          }
+          if (digest === parentB) {
+            return { manifests: [{ digest: shared }, { digest: onlyB }] }
+          }
+          return { layers: [] }
+        }
+      )
+
+      const map = await analyzer.loadDigestUsedByMap()
+
+      expect(map.get(shared)).toEqual(new Set([parentA, parentB]))
+      expect(map.get(onlyA)).toEqual(new Set([parentA]))
+      expect(map.get(onlyB)).toEqual(new Set([parentB]))
     })
 
     it('skips child manifests that are not present in the package list', async () => {
