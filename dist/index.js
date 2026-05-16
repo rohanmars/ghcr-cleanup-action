@@ -52827,33 +52827,7 @@ class DeletionStrategy {
             return deleteSet;
         }
         startGroup(`[${this.context.targetPackage}] Finding tagged images to delete, keeping ${this.context.config.keepNtagged} versions`);
-        const taggedPackages = [];
-        if (this.context.config.deleteTags != null) {
-            // Apply keep-n mode only on the supplied/expanded tags
-            const matchTags = this.imageFilter.expandTags(filterSet);
-            for (const tag of matchTags) {
-                const digest = this.context.packageRepo.getDigestByTag(tag);
-                if (digest) {
-                    const ghPackage = this.context.packageRepo.getPackageByDigest(digest);
-                    if (ghPackage) {
-                        taggedPackages.push(ghPackage);
-                    }
-                }
-            }
-        }
-        else {
-            // Copy images with tags from the full set
-            for (const digest of filterSet) {
-                const ghPackage = this.context.packageRepo.getPackageByDigest(digest);
-                if (ghPackage.metadata.container.tags.length > 0) {
-                    taggedPackages.push(ghPackage);
-                }
-            }
-        }
-        // Sort descending by date
-        taggedPackages.sort((a, b) => {
-            return Date.parse(b.updated_at) - Date.parse(a.updated_at);
-        });
+        const taggedPackages = this.collectKeepNTaggedCandidates(filterSet);
         if (taggedPackages.length > this.context.config.keepNtagged) {
             const deletePackages = taggedPackages.splice(this.context.config.keepNtagged);
             for (const deletePackage of deletePackages) {
@@ -52868,6 +52842,64 @@ class DeletionStrategy {
         }
         endGroup();
         return deleteSet;
+    }
+    /**
+     * Returns the set of digests that keep-n-tagged would protect — i.e. the
+     * top-N most recent images among the keep-n-tagged candidate set. Used by
+     * the orchestrator to gate untag operations so that a multi-tagged image
+     * in the keep set doesn't have a matched tag stripped before keep-n-tagged
+     * is consulted.
+     */
+    computeKeepNTaggedDigests(filterSet) {
+        const keepSet = new Set();
+        if (this.context.config.keepNtagged == null) {
+            return keepSet;
+        }
+        const candidates = this.collectKeepNTaggedCandidates(filterSet);
+        const kept = candidates.slice(0, this.context.config.keepNtagged);
+        for (const pkg of kept) {
+            keepSet.add(pkg.name);
+        }
+        return keepSet;
+    }
+    /**
+     * Collect the candidate set for keep-n-tagged, deduplicated by digest, and
+     * sorted newest-first. Shared by keepNTagged() (which deletes the tail) and
+     * computeKeepNTaggedDigests() (which protects the head).
+     *
+     * Dedup matters because the delete-tags branch walks per-tag and would
+     * otherwise enter the same image N times when an image has N matched tags —
+     * wrongly making each tag count as a separate keep-set slot.
+     */
+    collectKeepNTaggedCandidates(filterSet) {
+        const byDigest = new Map();
+        if (this.context.config.deleteTags != null) {
+            // Apply keep-n mode only on the supplied/expanded tags
+            const matchTags = this.imageFilter.expandTags(filterSet);
+            for (const tag of matchTags) {
+                const digest = this.context.packageRepo.getDigestByTag(tag);
+                if (digest && !byDigest.has(digest)) {
+                    const ghPackage = this.context.packageRepo.getPackageByDigest(digest);
+                    if (ghPackage) {
+                        byDigest.set(digest, ghPackage);
+                    }
+                }
+            }
+        }
+        else {
+            // Copy images with tags from the full set
+            for (const digest of filterSet) {
+                if (byDigest.has(digest))
+                    continue;
+                const ghPackage = this.context.packageRepo.getPackageByDigest(digest);
+                if (ghPackage.metadata.container.tags.length > 0) {
+                    byDigest.set(digest, ghPackage);
+                }
+            }
+        }
+        const taggedPackages = Array.from(byDigest.values());
+        taggedPackages.sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at));
+        return taggedPackages;
     }
     /**
      * Delete all untagged images
@@ -53119,6 +53151,17 @@ class CleanupOrchestrator {
         // Process tag deletions first - to support untagging
         if (this.config.deleteTags) {
             const plan = await this.deletionStrategy.processTagDeletions(this.filterSet, this.excludeTags);
+            // When keep-n-tagged is set, gate the untag operations: any image that
+            // keep-n-tagged would protect must not be partially untagged here.
+            // Otherwise multi-tagged images in the keep set get a matched tag
+            // stripped before keep-n-tagged runs, defeating its protection. See
+            // FINDINGS.md #10 / upstream issues #99 and #101.
+            if (this.config.keepNtagged != null && plan.untagOperations.size > 0) {
+                const keepSet = this.deletionStrategy.computeKeepNTaggedDigests(this.filterSet);
+                for (const digest of keepSet) {
+                    plan.untagOperations.delete(digest);
+                }
+            }
             // Perform untagging if needed
             let reloadOccurred = false;
             if (plan.untagOperations.size > 0 && this.imageDeleter) {

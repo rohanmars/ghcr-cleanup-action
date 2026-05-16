@@ -309,6 +309,146 @@ describe('DeletionStrategy', () => {
       expect(result.size).toBe(0)
       expect(core.info).toHaveBeenCalledWith('no tagged images found to delete')
     })
+
+    it('counts a multi-tagged image as one keep slot, not N (#10 dedup regression)', () => {
+      // Image_3 has three tags all matched by deleteTags. Without dedup,
+      // the candidate list becomes [Image_3, Image_3, Image_3, Image_2,
+      // Image_1] — top-2 are both Image_3, Image_2 falls off the keep set,
+      // and Image_2 gets wrongly deleted instead of Image_1.
+      context.config.keepNtagged = 2
+      context.config.deleteTags = '^(v.+|latest|stable)$'
+      context.config.useRegex = true
+      const filterSet = new Set(['image3', 'image2', 'image1'])
+
+      mockImageFilter.expandTags.mockReturnValue(
+        new Set(['v1.2', 'latest', 'stable', 'v1.1', 'v1.0'])
+      )
+      mockPackageRepo.getDigestByTag.mockImplementation(tag => {
+        if (['v1.2', 'latest', 'stable'].includes(tag)) return 'image3'
+        if (tag === 'v1.1') return 'image2'
+        if (tag === 'v1.0') return 'image1'
+        return undefined
+      })
+      mockPackageRepo.getPackageByDigest.mockImplementation(digest => ({
+        name: digest,
+        updated_at:
+          digest === 'image3'
+            ? '2024-03-01T00:00:00Z'
+            : digest === 'image2'
+              ? '2024-02-01T00:00:00Z'
+              : '2024-01-01T00:00:00Z',
+        metadata: {
+          container: {
+            tags:
+              digest === 'image3'
+                ? ['v1.2', 'latest', 'stable']
+                : digest === 'image2'
+                  ? ['v1.1']
+                  : ['v1.0']
+          }
+        }
+      }))
+
+      const result = strategy.keepNTagged(filterSet)
+
+      // Keep set should be {Image_3, Image_2}; only Image_1 deleted.
+      expect(result.size).toBe(1)
+      expect(result).toContain('image1')
+      expect(result).not.toContain('image2')
+      expect(result).not.toContain('image3')
+    })
+  })
+
+  describe('computeKeepNTaggedDigests', () => {
+    it('returns empty set when keepNtagged is not configured', () => {
+      context.config.keepNtagged = null
+
+      const keepSet = strategy.computeKeepNTaggedDigests(new Set())
+
+      expect(keepSet.size).toBe(0)
+    })
+
+    it('returns top-N most recent images when deleteTags is not set', () => {
+      context.config.keepNtagged = 2
+      context.config.deleteTags = null
+      const filterSet = new Set(['digest1', 'digest2', 'digest3', 'digest4'])
+
+      mockPackageRepo.getPackageByDigest.mockImplementation(digest => ({
+        name: digest,
+        updated_at: `2024-01-0${digest.slice(-1)}T00:00:00Z`,
+        metadata: { container: { tags: [`v${digest.slice(-1)}`] } }
+      }))
+
+      const keepSet = strategy.computeKeepNTaggedDigests(filterSet)
+
+      expect(keepSet.size).toBe(2)
+      expect(keepSet.has('digest4')).toBe(true)
+      expect(keepSet.has('digest3')).toBe(true)
+    })
+
+    it('dedupes by digest when deleteTags is set and one image has multiple matched tags', () => {
+      // Same scenario as the keepNTagged dedup test. The keep set must be
+      // {Image_3, Image_2} — not {Image_3} from triple-counting Image_3's
+      // three matched tags.
+      context.config.keepNtagged = 2
+      context.config.deleteTags = '^(v.+|latest|stable)$'
+      context.config.useRegex = true
+      const filterSet = new Set(['image3', 'image2', 'image1'])
+
+      mockImageFilter.expandTags.mockReturnValue(
+        new Set(['v1.2', 'latest', 'stable', 'v1.1', 'v1.0'])
+      )
+      mockPackageRepo.getDigestByTag.mockImplementation(tag => {
+        if (['v1.2', 'latest', 'stable'].includes(tag)) return 'image3'
+        if (tag === 'v1.1') return 'image2'
+        if (tag === 'v1.0') return 'image1'
+        return undefined
+      })
+      mockPackageRepo.getPackageByDigest.mockImplementation(digest => ({
+        name: digest,
+        updated_at:
+          digest === 'image3'
+            ? '2024-03-01T00:00:00Z'
+            : digest === 'image2'
+              ? '2024-02-01T00:00:00Z'
+              : '2024-01-01T00:00:00Z',
+        metadata: {
+          container: {
+            tags:
+              digest === 'image3'
+                ? ['v1.2', 'latest', 'stable']
+                : digest === 'image2'
+                  ? ['v1.1']
+                  : ['v1.0']
+          }
+        }
+      }))
+
+      const keepSet = strategy.computeKeepNTaggedDigests(filterSet)
+
+      expect(keepSet.size).toBe(2)
+      expect(keepSet.has('image3')).toBe(true)
+      expect(keepSet.has('image2')).toBe(true)
+      expect(keepSet.has('image1')).toBe(false)
+    })
+
+    it('returns all candidates when count is less than or equal to keepNtagged', () => {
+      context.config.keepNtagged = 5
+      context.config.deleteTags = null
+      const filterSet = new Set(['digest1', 'digest2'])
+
+      mockPackageRepo.getPackageByDigest.mockImplementation(digest => ({
+        name: digest,
+        updated_at: '2024-01-01T00:00:00Z',
+        metadata: { container: { tags: ['v1.0'] } }
+      }))
+
+      const keepSet = strategy.computeKeepNTaggedDigests(filterSet)
+
+      expect(keepSet.size).toBe(2)
+      expect(keepSet.has('digest1')).toBe(true)
+      expect(keepSet.has('digest2')).toBe(true)
+    })
   })
 
   describe('deleteAllUntagged', () => {

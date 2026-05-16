@@ -121,7 +121,8 @@ describe('CleanupOrchestrator', () => {
       }),
       keepNTagged: vi.fn().mockReturnValue(new Set()),
       keepNUntagged: vi.fn().mockReturnValue(new Set()),
-      deleteAllUntagged: vi.fn().mockReturnValue(new Set())
+      deleteAllUntagged: vi.fn().mockReturnValue(new Set()),
+      computeKeepNTaggedDigests: vi.fn().mockReturnValue(new Set())
     } as any
     vi.mocked(DeletionStrategy).mockImplementation(function () {
       return mockDeletionStrategy
@@ -284,6 +285,50 @@ describe('CleanupOrchestrator', () => {
       )
       expect(mockPackageRepo.loadPackages).toHaveBeenCalledTimes(2)
       expect(mockDeletionStrategy.processTagDeletions).toHaveBeenCalledTimes(2)
+    })
+
+    it('filters plan.untagOperations against the keep-n-tagged keep set (#10 regression)', async () => {
+      // Multi-tagged image is in the keep set; its queued untag operation
+      // must be dropped before performUntagging runs, otherwise a matched
+      // tag would be stripped from an image keep-n-tagged would have spared.
+      config.deleteTags = 'v1.0,latest'
+      config.keepNtagged = 2
+
+      const untagOps = new Map([
+        ['keep-digest', ['v1.0']], // in keep set — should be filtered out
+        ['drop-digest', ['latest']] // not in keep set — should proceed
+      ])
+      mockDeletionStrategy.processTagDeletions.mockResolvedValueOnce({
+        deleteSet: new Set(),
+        untagOperations: untagOps
+      })
+      mockDeletionStrategy.computeKeepNTaggedDigests.mockReturnValueOnce(
+        new Set(['keep-digest'])
+      )
+      mockImageDeleter.performUntagging.mockResolvedValue(false)
+
+      await orchestrator.run()
+
+      expect(mockDeletionStrategy.computeKeepNTaggedDigests).toHaveBeenCalled()
+      const passedToUntagging =
+        mockImageDeleter.performUntagging.mock.calls[0][0]
+      expect(passedToUntagging.has('keep-digest')).toBe(false)
+      expect(passedToUntagging.has('drop-digest')).toBe(true)
+    })
+
+    it('does not call computeKeepNTaggedDigests when keepNtagged is not set', async () => {
+      config.deleteTags = 'v1.0'
+      config.keepNtagged = undefined
+      mockDeletionStrategy.processTagDeletions.mockResolvedValueOnce({
+        deleteSet: new Set(),
+        untagOperations: new Map([['digest1', ['v1.0']]])
+      })
+
+      await orchestrator.run()
+
+      expect(
+        mockDeletionStrategy.computeKeepNTaggedDigests
+      ).not.toHaveBeenCalled()
     })
 
     it('should process partial images when deletePartialImages is true', async () => {
