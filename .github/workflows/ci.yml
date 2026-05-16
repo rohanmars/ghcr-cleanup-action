@@ -51,16 +51,17 @@ jobs:
         id: npm-ci-test
         run: npm run ci-test
 
-  # TEMP — inserted at the top of the integration chain while iterating on
-  # FINDINGS.md #20 (OCI 1.1 subject-based referrers / cosign bundles silently
-  # deleted as orphan untagged images). This job pushes an image, signs it with
-  # cosign in OCI 1.1 mode (which uploads the signature as an untagged
-  # subject-bearing artifact rather than a `sha256-<digest>.sig` tag), dumps the
-  # resulting registry state for diagnostics, and runs the cleanup action under
-  # the configuration from upstream issue #104 (`delete-untagged: true`). Before
-  # the #20 fix lands, validation is expected to fail with the signature
-  # artifact missing — confirming the reproducer. After the fix, the signature
-  # must survive because it has a subject pointing at a still-kept image.
+  # TEMP — inserted at the top of the integration chain while iterating on the
+  # OCI 1.1 subject-based referrers behavior (cosign signature bundles
+  # potentially deleted as orphan untagged images). This job pushes an image,
+  # signs it with cosign in OCI 1.1 mode (which uploads the signature as an
+  # untagged subject-bearing artifact alongside a fallback tag-list on
+  # registries that don't support /referrers, like ghcr), dumps the resulting
+  # registry state for diagnostics, and runs the cleanup action under the
+  # configuration from upstream issue #104 (delete-untagged: true). Used to
+  # observe ground truth: confirm whether cosign's hybrid output is already
+  # protected by the existing tag-based + manifest-list code paths, and how
+  # the registry state looks before and after cleanup.
   cosign-oci11-test:
     name: Cosign OCI 1.1 Referrers Test
     runs-on: ubuntu-24.04
@@ -154,23 +155,22 @@ jobs:
             | tr -d '\r' | awk '/^[Dd]ocker-[Cc]ontent-[Dd]igest:/ {print $2}')
           echo "Signed image digest: $SIGNED_DIGEST"
           echo
-          echo '===== Inspecting each untagged package version for subject/artifactType ====='
+          echo '===== Inspecting EVERY package version manifest (including tagged) ====='
           curl -fsSL \
             -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
             "https://api.github.com/users/$REPO_OWNER/packages/container/ghcr-cleanup-action/versions" \
-            | jq -r '.[] | select(.metadata.container.tags == []) | .name' \
-            | while read -r digest; do
-                echo "--- $digest ---"
+            | jq -r '.[] | "\(.name)|\(.metadata.container.tags | join(","))"' \
+            | while IFS='|' read -r digest tags; do
+                echo "--- $digest  tags=[$tags] ---"
                 curl -fsSL \
                   -H "Authorization: Bearer $PULL_TOKEN" \
                   -H 'Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
                   "https://ghcr.io/v2/${REPO_OWNER,,}/ghcr-cleanup-action/manifests/$digest" \
-                  | jq '{mediaType, artifactType, subject, config: .config.mediaType, layerCount: (.layers // [] | length)}'
+                  | jq '{mediaType, artifactType, subject, config: .config.mediaType, layerCount: (.layers // [] | length), manifestChildren: (.manifests // [] | map({digest, artifactType, mediaType}))}'
               done
 
-      - name: Run Test - Cosign OCI 1.1 (delete-untagged - expected to fail
-          before #20 fix)
+      - name: Run Test - Cosign OCI 1.1 (delete-untagged - diagnostic)
         uses: ./
         with:
           delete-untagged: true
@@ -199,10 +199,138 @@ jobs:
           node citester/index.js --token "$GH_TOKEN" --directory \
             tests/cosign-oci11 --mode validate
 
+  # TEMP — second diagnostic for the OCI 1.1 referrers work. Unlike cosign in
+  # oci-1-1 mode (which on a registry that doesn't advertise /referrers
+  # support like ghcr writes both a subject-bearing referrer AND a fallback
+  # tag-list — and therefore gets accidentally protected by the existing
+  # tag-based + manifest-list handling), `actions/attest-build-provenance`
+  # writes ONLY the subject-bearing OCI 1.1 referrer with no tag fallback.
+  # That's the artifact shape upstream issue #104's reporter described. This
+  # job is expected to demonstrate the bug: cleanup with delete-untagged:
+  # true will delete the attestation artifact, breaking provenance
+  # verification for the still-kept image.
+  attest-provenance-oci11-test:
+    name: Attest Build Provenance OCI 1.1 Test
+    runs-on: ubuntu-24.04
+    needs: cosign-oci11-test
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .node-version
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: lower-repo
+        run: |
+          echo "repository=${GITHUB_REPOSITORY@L}" >> "$GITHUB_OUTPUT"
+
+      - name: Prime - Attest Build Provenance OCI 1.1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node citester/index.js --token "$GH_TOKEN" --directory \
+            tests/attest-provenance-oci11 --mode prime
+
+      - name: Build and push image
+        id: push
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        with:
+          context: tests/attest-provenance-oci11
+          file: tests/attest-provenance-oci11/Dockerfile.image
+          push: true
+          tags:
+            ${{ env.REGISTRY }}/${{ steps.lower-repo.outputs.repository
+            }}:attest-test
+
+      - name: Attest image (build provenance, push to registry)
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-name:
+            ${{ env.REGISTRY }}/${{ steps.lower-repo.outputs.repository }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+      - name: Dump registry state after attestation (diagnostic)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          REPO_OWNER="${GITHUB_REPOSITORY%/*}"
+          echo '===== GitHub Packages — versions list ====='
+          curl -fsSL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/users/$REPO_OWNER/packages/container/ghcr-cleanup-action/versions" \
+            | jq '.[] | {id, digest: .name, tags: .metadata.container.tags, created_at, updated_at}'
+          echo
+          echo '===== Inspecting EVERY package version manifest ====='
+          PULL_TOKEN=$(curl -fsSL \
+            -u "token:$GH_TOKEN" \
+            "https://ghcr.io/token?service=ghcr.io&scope=repository:${REPO_OWNER,,}/ghcr-cleanup-action:pull" \
+            | jq -r '.token')
+          curl -fsSL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/users/$REPO_OWNER/packages/container/ghcr-cleanup-action/versions" \
+            | jq -r '.[] | "\(.name)|\(.metadata.container.tags | join(","))"' \
+            | while IFS='|' read -r digest tags; do
+                echo "--- $digest  tags=[$tags] ---"
+                curl -fsSL \
+                  -H "Authorization: Bearer $PULL_TOKEN" \
+                  -H 'Accept: application/vnd.oci.image.manifest.v1+json, application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+                  "https://ghcr.io/v2/${REPO_OWNER,,}/ghcr-cleanup-action/manifests/$digest" \
+                  | jq '{mediaType, artifactType, subject, config: .config.mediaType, layerCount: (.layers // [] | length), manifestChildren: (.manifests // [] | map({digest, artifactType, mediaType}))}'
+              done
+
+      - name:
+          Run Test - Attest Build Provenance (delete-untagged - expected to
+          delete the attestation artifact under current behavior)
+        uses: ./
+        with:
+          delete-untagged: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Dump registry state after cleanup (diagnostic)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          REPO_OWNER="${GITHUB_REPOSITORY%/*}"
+          echo '===== GitHub Packages — versions list after cleanup ====='
+          curl -fsSL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/users/$REPO_OWNER/packages/container/ghcr-cleanup-action/versions" \
+            | jq '.[] | {id, digest: .name, tags: .metadata.container.tags}'
+
+      - name: Validate Test Results - Attest Build Provenance
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+        run: |
+          node citester/index.js --token "$GH_TOKEN" --directory \
+            tests/attest-provenance-oci11 --mode validate
+
   integration-tests:
     name: Test
     runs-on: ubuntu-24.04
-    needs: cosign-oci11-test
+    needs: attest-provenance-oci11-test
     permissions:
       contents: read
       packages: write
