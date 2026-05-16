@@ -39460,19 +39460,42 @@ function getIDToken(aud) {
 //# sourceMappingURL=core.js.map
 ;// CONCATENATED MODULE: ./src/utils.ts
 
+// A sha256 digest is 'sha256:' (7) + 64 hex chars = 71 chars total.
+const SHA256_DIGEST_LENGTH = 'sha256:'.length + 64;
+/**
+ * Recover the parent image digest from a cosign/sigstore referrer tag.
+ *
+ * Referrer tags follow the convention `sha256-<64 hex>.<suffix>` where the
+ * suffix is `.sig`, `.att`, `.sbom`, etc. The parent digest is the 71-char
+ * `sha256:<64 hex>` string after replacing the `sha256-` prefix and stripping
+ * the suffix.
+ *
+ * Returns null if the tag doesn't match the expected referrer format.
+ */
+function parentDigestFromReferrerTag(tag) {
+    if (!tag.startsWith('sha256-'))
+        return null;
+    const digest = `sha256:${tag.slice('sha256-'.length)}`;
+    if (digest.length < SHA256_DIGEST_LENGTH)
+        return null;
+    return digest.slice(0, SHA256_DIGEST_LENGTH);
+}
 function parseChallenge(challenge) {
     const attributes = new Map();
     if (challenge.startsWith('Bearer ')) {
         challenge = challenge.replace('Bearer ', '');
         const parts = challenge.split(',');
         for (const part of parts) {
-            const values = part.split('=');
-            if (values.length >= 2) {
-                let value = values[1] || '';
-                if (value.startsWith('"') && value.endsWith('"')) {
+            // Split on the first '=' only — values may legitimately contain '='
+            // (e.g. base64-encoded scopes from some token services).
+            const idx = part.indexOf('=');
+            if (idx > 0) {
+                const key = part.substring(0, idx);
+                let value = part.substring(idx + 1);
+                if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
                     value = value.substring(1, value.length - 1);
                 }
-                attributes.set(values[0], value);
+                attributes.set(key, value);
             }
         }
     }
@@ -44237,7 +44260,10 @@ async function buildConfig() {
         config.olderThan = human_interval_default()(getInput('older-than'));
         // save the text version of it
         config.olderThanReadable = getInput('older-than');
-        if (config.olderThan != null && isNaN(config.olderThan)) {
+        // humanInterval returns undefined for unparsable strings and NaN for
+        // partially-parsed ones. Both must be treated as fatal — otherwise the
+        // filter is silently skipped at runtime.
+        if (config.olderThan == null || isNaN(config.olderThan)) {
             // check if it has an interval type
             const regexp = /(second|minute|hour|day|week|month|year)s?/;
             const match = config.olderThanReadable.match(regexp);
@@ -44288,8 +44314,8 @@ async function buildConfig() {
             config.deleteUntagged = true;
         }
     }
-    if (config.keepNuntagged && getInput('delete-untagged')) {
-        throw new Error('delete-untagged and keep-n-untagged can not be set at the same time');
+    if (config.keepNuntagged != null && getInput('delete-untagged')) {
+        throw new Error('delete-untagged and keep-n-untagged cannot be set at the same time');
     }
     if (getInput('delete-ghost-images')) {
         config.deleteGhostImages = getBooleanInput('delete-ghost-images');
@@ -52095,7 +52121,7 @@ class Registry {
                             }
                         }
                         else {
-                            throw new Error(`${this.baseUrl} login failed: ${token.response.data}`);
+                            throw new Error(`${this.baseUrl} login failed: ${JSON.stringify(tokenResponse.data)}`);
                         }
                     }
                     else {
@@ -52106,6 +52132,10 @@ class Registry {
                     setFailed(`Error logging into registry API with package: ${targetPackage}`);
                     throw error;
                 }
+            }
+            else {
+                // Non-axios error or error without a response — rethrow so caller sees it
+                throw error;
             }
         }
     }
@@ -52160,52 +52190,42 @@ class Registry {
                     'Content-Type': contentType
                 }
             };
-            // upgrade token
-            let putToken;
             const auth = lib_axios.create();
             esm(auth, { retries: 3 });
+            let putToken;
             try {
                 await auth.put(`${this.baseUrl}v2/${this.config.owner}/${this.targetPackage}/manifests/${tag}`, manifest, config);
+                // No challenge issued — upload already succeeded
+                return;
             }
             catch (error) {
-                if (axios_isAxiosError(error) && error.response) {
-                    if (error.response.status === 401) {
-                        const challenge = error.response?.headers['www-authenticate'];
-                        const attributes = parseChallenge(challenge);
-                        if (isValidChallenge(attributes)) {
-                            // crude
-                            const tokenResponse = await auth.get(`${attributes.get('realm')}?service=${attributes.get('service')}&scope=${attributes.get('scope')}`, {
-                                auth: {
-                                    username: 'token',
-                                    password: this.config.token
-                                }
-                            });
-                            putToken = tokenResponse.data.token;
-                        }
-                        else {
-                            throw new Error(`invalid www-authenticate challenge ${challenge}`);
-                        }
+                if (axios_isAxiosError(error) && error.response?.status === 401) {
+                    const challenge = error.response.headers['www-authenticate'];
+                    const attributes = parseChallenge(challenge);
+                    if (!isValidChallenge(attributes)) {
+                        throw new Error(`invalid www-authenticate challenge ${challenge}`);
                     }
-                    else {
-                        throw error;
-                    }
+                    const tokenResponse = await auth.get(`${attributes.get('realm')}?service=${attributes.get('service')}&scope=${attributes.get('scope')}`, {
+                        auth: {
+                            username: 'token',
+                            password: this.config.token
+                        }
+                    });
+                    putToken = tokenResponse.data.token;
                 }
                 else {
                     throw error;
                 }
             }
-            if (putToken) {
-                // now put the updated manifest
-                await this.axios.put(`/v2/${this.config.owner}/${this.targetPackage}/manifests/${tag}`, manifest, {
-                    headers: {
-                        'content-type': contentType,
-                        Authorization: `Bearer ${putToken}`
-                    }
-                });
+            if (!putToken) {
+                throw new Error('failed to obtain push token from authentication challenge');
             }
-            else {
-                throw new Error('no token set to upload manifest');
-            }
+            await this.axios.put(`/v2/${this.config.owner}/${this.targetPackage}/manifests/${tag}`, manifest, {
+                headers: {
+                    'content-type': contentType,
+                    Authorization: `Bearer ${putToken}`
+                }
+            });
         }
     }
 }
@@ -52376,8 +52396,23 @@ class ManifestAnalyzer {
         const digestCount = digests.size;
         let processed = 0;
         let skipped = 0;
+        // Track digests we've already seen as children of some parent index.
+        // Used to skip the redundant manifest fetch when the outer loop reaches
+        // them — they have no children of their own to map. NOTE: we must NOT
+        // remove these from `digests`, otherwise subsequent parents that also
+        // reference the same child can't register themselves as a parent, and
+        // the cascade-delete safety check in image-deleter would treat
+        // multi-parent shared children as single-parent and wrongly delete them.
+        const knownChildren = new Set();
         startGroup(`[${this.context.targetPackage}] Loading manifests`);
         for (const digest of digests) {
+            if (knownChildren.has(digest)) {
+                // Already mapped as a child of a previously-seen parent index;
+                // no need to fetch its manifest again.
+                skipped++;
+                processed++;
+                continue;
+            }
             const manifest = await this.context.registry.getManifestByDigest(digest);
             processed++;
             if (this.context.config.logLevel === LogLevel.DEBUG) {
@@ -52387,9 +52422,9 @@ class ManifestAnalyzer {
             else {
                 // Output a status message if 3 seconds has passed
                 const now = new Date();
-                if (now.getMilliseconds() - stopWatch.getMilliseconds() >= 3000) {
+                if (now.getTime() - stopWatch.getTime() >= 3000) {
                     info(`loaded ${processed} of ${digestCount} manifests`);
-                    stopWatch = new Date(); // Reset the clock
+                    stopWatch = now; // Reset the clock
                 }
             }
             // We only map multi-arch images
@@ -52403,10 +52438,7 @@ class ManifestAnalyzer {
                             digestUsedBy.set(imageManifest.digest, parents);
                         }
                         parents.add(digest);
-                        // Now remove so we don't download the child manifest later on in loop
-                        digests.delete(imageManifest.digest);
-                        skipped++;
-                        processed++;
+                        knownChildren.add(imageManifest.digest);
                     }
                 }
             }
@@ -52526,6 +52558,7 @@ class ManifestAnalyzer {
 
 ;// CONCATENATED MODULE: ./src/image-validator.ts
 
+
 class ImageValidator {
     context;
     constructor(context) {
@@ -52564,15 +52597,10 @@ class ImageValidator {
         // Check for orphaned tags (referrers/cosign etc)
         const tagsInUse = this.context.packageRepo.getTags();
         for (const tag of tagsInUse) {
-            if (tag.startsWith('sha256-')) {
-                let digest = tag.replace('sha256-', 'sha256:');
-                if (digest.length > 71) {
-                    digest = digest.substring(0, 71);
-                }
-                if (!this.context.packageRepo.getIdByDigest(digest)) {
-                    hasErrors = true;
-                    warning(`parent image for referrer tag ${tag} not found in repository`);
-                }
+            const digest = parentDigestFromReferrerTag(tag);
+            if (digest && !this.context.packageRepo.getIdByDigest(digest)) {
+                hasErrors = true;
+                warning(`parent image for referrer tag ${tag} not found in repository`);
             }
         }
         if (!hasErrors) {
@@ -52657,18 +52685,13 @@ class ImageValidator {
         startGroup(`[${this.context.targetPackage}] Finding orphaned images (tags) to delete`);
         const orphanedImages = new Set();
         for (const tag of this.context.packageRepo.getTags()) {
-            if (tag.startsWith('sha256-')) {
-                let digest = tag.replace('sha256-', 'sha256:');
-                if (digest.length > 71) {
-                    digest = digest.substring(0, 71);
-                }
-                // Check if that digest exists
-                if (this.context.packageRepo.getIdByDigest(digest) === undefined) {
-                    const orphanDigest = this.context.packageRepo.getDigestByTag(tag);
-                    if (orphanDigest) {
-                        orphanedImages.add(orphanDigest);
-                        info(tag);
-                    }
+            const digest = parentDigestFromReferrerTag(tag);
+            if (digest &&
+                this.context.packageRepo.getIdByDigest(digest) === undefined) {
+                const orphanDigest = this.context.packageRepo.getDigestByTag(tag);
+                if (orphanDigest) {
+                    orphanedImages.add(orphanDigest);
+                    info(tag);
                 }
             }
         }

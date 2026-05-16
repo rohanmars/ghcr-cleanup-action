@@ -109,7 +109,7 @@ export class Registry {
               }
             } else {
               throw new Error(
-                `${this.baseUrl} login failed: ${token.response.data}`
+                `${this.baseUrl} login failed: ${JSON.stringify(tokenResponse.data)}`
               )
             }
           } else {
@@ -121,6 +121,9 @@ export class Registry {
           )
           throw error
         }
+      } else {
+        // Non-axios error or error without a response — rethrow so caller sees it
+        throw error
       }
     }
   }
@@ -184,59 +187,57 @@ export class Registry {
           'Content-Type': contentType
         }
       }
-      // upgrade token
-      let putToken
+
       const auth = axios.create()
       axiosRetry(auth, { retries: 3 })
+
+      let putToken: string | undefined
       try {
         await auth.put(
           `${this.baseUrl}v2/${this.config.owner}/${this.targetPackage}/manifests/${tag}`,
           manifest,
           config
         )
+        // No challenge issued — upload already succeeded
+        return
       } catch (error) {
-        if (isAxiosError(error) && error.response) {
-          if (error.response.status === 401) {
-            const challenge = error.response?.headers['www-authenticate']
-            const attributes = parseChallenge(challenge)
-            if (isValidChallenge(attributes)) {
-              // crude
-              const tokenResponse = await auth.get(
-                `${attributes.get('realm')}?service=${attributes.get('service')}&scope=${attributes.get('scope')}`,
-                {
-                  auth: {
-                    username: 'token',
-                    password: this.config.token
-                  }
-                }
-              )
-              putToken = tokenResponse.data.token
-            } else {
-              throw new Error(`invalid www-authenticate challenge ${challenge}`)
-            }
-          } else {
-            throw error
+        if (isAxiosError(error) && error.response?.status === 401) {
+          const challenge = error.response.headers['www-authenticate']
+          const attributes = parseChallenge(challenge)
+          if (!isValidChallenge(attributes)) {
+            throw new Error(`invalid www-authenticate challenge ${challenge}`)
           }
+          const tokenResponse = await auth.get(
+            `${attributes.get('realm')}?service=${attributes.get('service')}&scope=${attributes.get('scope')}`,
+            {
+              auth: {
+                username: 'token',
+                password: this.config.token
+              }
+            }
+          )
+          putToken = tokenResponse.data.token
         } else {
           throw error
         }
       }
 
-      if (putToken) {
-        // now put the updated manifest
-        await this.axios.put(
-          `/v2/${this.config.owner}/${this.targetPackage}/manifests/${tag}`,
-          manifest,
-          {
-            headers: {
-              'content-type': contentType,
-              Authorization: `Bearer ${putToken}`
-            }
-          }
+      if (!putToken) {
+        throw new Error(
+          'failed to obtain push token from authentication challenge'
         )
-      } else {
-        throw new Error('no token set to upload manifest')
       }
+
+      await this.axios.put(
+        `/v2/${this.config.owner}/${this.targetPackage}/manifests/${tag}`,
+        manifest,
+        {
+          headers: {
+            'content-type': contentType,
+            Authorization: `Bearer ${putToken}`
+          }
+        }
+      )
     }
   }
 

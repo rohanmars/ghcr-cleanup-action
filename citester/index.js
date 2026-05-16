@@ -37554,7 +37554,10 @@ async function buildConfig() {
         config.olderThan = humanInterval(core.getInput('older-than'));
         // save the text version of it
         config.olderThanReadable = core.getInput('older-than');
-        if (config.olderThan != null && isNaN(config.olderThan)) {
+        // humanInterval returns undefined for unparsable strings and NaN for
+        // partially-parsed ones. Both must be treated as fatal — otherwise the
+        // filter is silently skipped at runtime.
+        if (config.olderThan == null || isNaN(config.olderThan)) {
             // check if it has an interval type
             const regexp = /(second|minute|hour|day|week|month|year)s?/;
             const match = config.olderThanReadable.match(regexp);
@@ -37605,8 +37608,8 @@ async function buildConfig() {
             config.deleteUntagged = true;
         }
     }
-    if (config.keepNuntagged && core.getInput('delete-untagged')) {
-        throw new Error('delete-untagged and keep-n-untagged can not be set at the same time');
+    if (config.keepNuntagged != null && core.getInput('delete-untagged')) {
+        throw new Error('delete-untagged and keep-n-untagged cannot be set at the same time');
     }
     if (core.getInput('delete-ghost-images')) {
         config.deleteGhostImages = core.getBooleanInput('delete-ghost-images');
@@ -49870,7 +49873,7 @@ class Registry {
                             }
                         }
                         else {
-                            throw new Error(`${this.baseUrl} login failed: ${token.response.data}`);
+                            throw new Error(`${this.baseUrl} login failed: ${JSON.stringify(tokenResponse.data)}`);
                         }
                     }
                     else {
@@ -49881,6 +49884,10 @@ class Registry {
                     core/* setFailed */.C1(`Error logging into registry API with package: ${targetPackage}`);
                     throw error;
                 }
+            }
+            else {
+                // Non-axios error or error without a response — rethrow so caller sees it
+                throw error;
             }
         }
     }
@@ -49935,52 +49942,42 @@ class Registry {
                     'Content-Type': contentType
                 }
             };
-            // upgrade token
-            let putToken;
             const auth = lib_axios.create();
             esm(auth, { retries: 3 });
+            let putToken;
             try {
                 await auth.put(`${this.baseUrl}v2/${this.config.owner}/${this.targetPackage}/manifests/${tag}`, manifest, config);
+                // No challenge issued — upload already succeeded
+                return;
             }
             catch (error) {
-                if (axios_isAxiosError(error) && error.response) {
-                    if (error.response.status === 401) {
-                        const challenge = error.response?.headers['www-authenticate'];
-                        const attributes = (0,src_utils/* parseChallenge */.xy)(challenge);
-                        if ((0,src_utils/* isValidChallenge */.iD)(attributes)) {
-                            // crude
-                            const tokenResponse = await auth.get(`${attributes.get('realm')}?service=${attributes.get('service')}&scope=${attributes.get('scope')}`, {
-                                auth: {
-                                    username: 'token',
-                                    password: this.config.token
-                                }
-                            });
-                            putToken = tokenResponse.data.token;
-                        }
-                        else {
-                            throw new Error(`invalid www-authenticate challenge ${challenge}`);
-                        }
+                if (axios_isAxiosError(error) && error.response?.status === 401) {
+                    const challenge = error.response.headers['www-authenticate'];
+                    const attributes = (0,src_utils/* parseChallenge */.xy)(challenge);
+                    if (!(0,src_utils/* isValidChallenge */.iD)(attributes)) {
+                        throw new Error(`invalid www-authenticate challenge ${challenge}`);
                     }
-                    else {
-                        throw error;
-                    }
+                    const tokenResponse = await auth.get(`${attributes.get('realm')}?service=${attributes.get('service')}&scope=${attributes.get('scope')}`, {
+                        auth: {
+                            username: 'token',
+                            password: this.config.token
+                        }
+                    });
+                    putToken = tokenResponse.data.token;
                 }
                 else {
                     throw error;
                 }
             }
-            if (putToken) {
-                // now put the updated manifest
-                await this.axios.put(`/v2/${this.config.owner}/${this.targetPackage}/manifests/${tag}`, manifest, {
-                    headers: {
-                        'content-type': contentType,
-                        Authorization: `Bearer ${putToken}`
-                    }
-                });
+            if (!putToken) {
+                throw new Error('failed to obtain push token from authentication challenge');
             }
-            else {
-                throw new Error('no token set to upload manifest');
-            }
+            await this.axios.put(`/v2/${this.config.owner}/${this.targetPackage}/manifests/${tag}`, manifest, {
+                headers: {
+                    'content-type': contentType,
+                    Authorization: `Bearer ${putToken}`
+                }
+            });
         }
     }
 }
@@ -49995,22 +49992,45 @@ class Registry {
 /* harmony export */   iD: () => (/* binding */ isValidChallenge),
 /* harmony export */   xy: () => (/* binding */ parseChallenge)
 /* harmony export */ });
-/* unused harmony exports MapPrinter, CleanupTaskStatistics */
+/* unused harmony exports SHA256_DIGEST_LENGTH, parentDigestFromReferrerTag, MapPrinter, CleanupTaskStatistics */
 /* harmony import */ var _actions_core__WEBPACK_IMPORTED_MODULE_0__ = __nccwpck_require__(4116);
 
+// A sha256 digest is 'sha256:' (7) + 64 hex chars = 71 chars total.
+const SHA256_DIGEST_LENGTH = 'sha256:'.length + 64;
+/**
+ * Recover the parent image digest from a cosign/sigstore referrer tag.
+ *
+ * Referrer tags follow the convention `sha256-<64 hex>.<suffix>` where the
+ * suffix is `.sig`, `.att`, `.sbom`, etc. The parent digest is the 71-char
+ * `sha256:<64 hex>` string after replacing the `sha256-` prefix and stripping
+ * the suffix.
+ *
+ * Returns null if the tag doesn't match the expected referrer format.
+ */
+function parentDigestFromReferrerTag(tag) {
+    if (!tag.startsWith('sha256-'))
+        return null;
+    const digest = `sha256:${tag.slice('sha256-'.length)}`;
+    if (digest.length < SHA256_DIGEST_LENGTH)
+        return null;
+    return digest.slice(0, SHA256_DIGEST_LENGTH);
+}
 function parseChallenge(challenge) {
     const attributes = new Map();
     if (challenge.startsWith('Bearer ')) {
         challenge = challenge.replace('Bearer ', '');
         const parts = challenge.split(',');
         for (const part of parts) {
-            const values = part.split('=');
-            if (values.length >= 2) {
-                let value = values[1] || '';
-                if (value.startsWith('"') && value.endsWith('"')) {
+            // Split on the first '=' only — values may legitimately contain '='
+            // (e.g. base64-encoded scopes from some token services).
+            const idx = part.indexOf('=');
+            if (idx > 0) {
+                const key = part.substring(0, idx);
+                let value = part.substring(idx + 1);
+                if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
                     value = value.substring(1, value.length - 1);
                 }
-                attributes.set(values[0], value);
+                attributes.set(key, value);
             }
         }
     }

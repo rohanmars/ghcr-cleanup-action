@@ -20,9 +20,24 @@ export class ManifestAnalyzer {
     const digestCount = digests.size
     let processed = 0
     let skipped = 0
+    // Track digests we've already seen as children of some parent index.
+    // Used to skip the redundant manifest fetch when the outer loop reaches
+    // them — they have no children of their own to map. NOTE: we must NOT
+    // remove these from `digests`, otherwise subsequent parents that also
+    // reference the same child can't register themselves as a parent, and
+    // the cascade-delete safety check in image-deleter would treat
+    // multi-parent shared children as single-parent and wrongly delete them.
+    const knownChildren = new Set<string>()
 
     core.startGroup(`[${this.context.targetPackage}] Loading manifests`)
     for (const digest of digests) {
+      if (knownChildren.has(digest)) {
+        // Already mapped as a child of a previously-seen parent index;
+        // no need to fetch its manifest again.
+        skipped++
+        processed++
+        continue
+      }
       const manifest = await this.context.registry.getManifestByDigest(digest)
       processed++
       if (this.context.config.logLevel === LogLevel.DEBUG) {
@@ -31,9 +46,9 @@ export class ManifestAnalyzer {
       } else {
         // Output a status message if 3 seconds has passed
         const now = new Date()
-        if (now.getMilliseconds() - stopWatch.getMilliseconds() >= 3000) {
+        if (now.getTime() - stopWatch.getTime() >= 3000) {
           core.info(`loaded ${processed} of ${digestCount} manifests`)
-          stopWatch = new Date() // Reset the clock
+          stopWatch = now // Reset the clock
         }
       }
 
@@ -48,11 +63,7 @@ export class ManifestAnalyzer {
               digestUsedBy.set(imageManifest.digest, parents)
             }
             parents.add(digest)
-
-            // Now remove so we don't download the child manifest later on in loop
-            digests.delete(imageManifest.digest)
-            skipped++
-            processed++
+            knownChildren.add(imageManifest.digest)
           }
         }
       }

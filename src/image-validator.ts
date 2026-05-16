@@ -1,5 +1,6 @@
 import * as core from '@actions/core'
 import { CleanupContext, ValidationResult } from './cleanup-types.js'
+import { parentDigestFromReferrerTag } from './utils.js'
 
 export class ImageValidator {
   private context: CleanupContext
@@ -51,17 +52,12 @@ export class ImageValidator {
     // Check for orphaned tags (referrers/cosign etc)
     const tagsInUse = this.context.packageRepo.getTags()
     for (const tag of tagsInUse) {
-      if (tag.startsWith('sha256-')) {
-        let digest = tag.replace('sha256-', 'sha256:')
-        if (digest.length > 71) {
-          digest = digest.substring(0, 71)
-        }
-        if (!this.context.packageRepo.getIdByDigest(digest)) {
-          hasErrors = true
-          core.warning(
-            `parent image for referrer tag ${tag} not found in repository`
-          )
-        }
+      const digest = parentDigestFromReferrerTag(tag)
+      if (digest && !this.context.packageRepo.getIdByDigest(digest)) {
+        hasErrors = true
+        core.warning(
+          `parent image for referrer tag ${tag} not found in repository`
+        )
       }
     }
 
@@ -163,18 +159,15 @@ export class ImageValidator {
     const orphanedImages = new Set<string>()
 
     for (const tag of this.context.packageRepo.getTags()) {
-      if (tag.startsWith('sha256-')) {
-        let digest = tag.replace('sha256-', 'sha256:')
-        if (digest.length > 71) {
-          digest = digest.substring(0, 71)
-        }
-        // Check if that digest exists
-        if (this.context.packageRepo.getIdByDigest(digest) === undefined) {
-          const orphanDigest = this.context.packageRepo.getDigestByTag(tag)
-          if (orphanDigest) {
-            orphanedImages.add(orphanDigest)
-            core.info(tag)
-          }
+      const digest = parentDigestFromReferrerTag(tag)
+      if (
+        digest &&
+        this.context.packageRepo.getIdByDigest(digest) === undefined
+      ) {
+        const orphanDigest = this.context.packageRepo.getDigestByTag(tag)
+        if (orphanDigest) {
+          orphanedImages.add(orphanDigest)
+          core.info(tag)
         }
       }
     }
