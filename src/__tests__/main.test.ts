@@ -268,6 +268,39 @@ describe('main.run()', () => {
       expect(vi.mocked(CleanupOrchestrator)).not.toHaveBeenCalled()
     })
 
+    // Fine-grained PATs return tokenType='oauth' so they pass the first gate.
+    // ghcr.io doesn't currently support them, so reject up-front to give a
+    // clear error instead of letting the user hit an opaque 403 later.
+    it('fails when expandPackages=true and token is a fine-grained PAT', async () => {
+      mockBuildConfig.mockResolvedValue(defaultConfig({ expandPackages: true }))
+      mockAuth.mockResolvedValueOnce({
+        tokenType: 'oauth',
+        token: 'github_pat_AAAAAAAAAAAAAAAAAAAAAA_xxxxx'
+      })
+
+      await run()
+
+      expect(core.setFailed).toHaveBeenCalledWith(
+        expect.stringContaining('classic Personal Access Token')
+      )
+      expect(mockPackageRepo.getPackageList).not.toHaveBeenCalled()
+      expect(vi.mocked(CleanupOrchestrator)).not.toHaveBeenCalled()
+    })
+
+    it('allows classic PATs (ghp_*) when expandPackages=true', async () => {
+      mockBuildConfig.mockResolvedValue(defaultConfig({ expandPackages: true }))
+      mockAuth.mockResolvedValueOnce({
+        tokenType: 'oauth',
+        token: 'ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
+      })
+      mockPackageRepo.getPackageList.mockResolvedValue(['pkg-a'])
+
+      await run()
+
+      expect(core.setFailed).not.toHaveBeenCalled()
+      expect(mockPackageRepo.getPackageList).toHaveBeenCalled()
+    })
+
     it('fails when zero packages match the filter', async () => {
       mockBuildConfig.mockResolvedValue(
         defaultConfig({
