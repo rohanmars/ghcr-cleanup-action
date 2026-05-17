@@ -57,14 +57,21 @@ class CleanupAction {
       const packagesInUse: string[] = await packageRepo.getPackageList()
 
       if (this.config.useRegex) {
-        const regex = new RegExp(this.config.package)
+        const regex = new RegExp(this.config.package.trim())
         targetPackages = packagesInUse.filter(name => regex.test(name))
       } else {
-        const isTagMatch = wcmatch(this.config.package.split(','))
+        const patterns = this.config.package
+          .split(',')
+          .map(s => s.trim())
+          .filter(Boolean)
+        const isTagMatch = wcmatch(patterns)
         targetPackages = packagesInUse.filter(name => isTagMatch(name))
       }
     } else {
-      targetPackages = this.config.package.split(',')
+      targetPackages = this.config.package
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean)
     }
 
     if (targetPackages.length === 0) {

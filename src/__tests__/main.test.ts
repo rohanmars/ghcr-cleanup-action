@@ -1,12 +1,5 @@
 /* eslint-disable @typescript-eslint/unbound-method, @typescript-eslint/no-non-null-assertion */
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  vi,
-  type Mocked
-} from 'vitest'
+import { describe, it, expect, beforeEach, vi, type Mocked } from 'vitest'
 import * as core from '@actions/core'
 import { run } from '../main'
 import { Config, buildConfig } from '../config'
@@ -85,16 +78,16 @@ describe('main.run()', () => {
     mockBuildConfig.mockResolvedValue(defaultConfig())
 
     mockOctokitClient = { getClient: vi.fn() }
-    vi.mocked(OctokitClient).mockImplementation(
-      function () { return mockOctokitClient } as any
-    )
+    vi.mocked(OctokitClient).mockImplementation(function () {
+      return mockOctokitClient
+    } as any)
 
     mockPackageRepo = {
       getPackageList: vi.fn().mockResolvedValue(['pkg-a', 'pkg-b', 'pkg-c'])
     }
-    vi.mocked(PackageRepo).mockImplementation(
-      function () { return mockPackageRepo } as any
-    )
+    vi.mocked(PackageRepo).mockImplementation(function () {
+      return mockPackageRepo
+    } as any)
 
     // Per-package stats returned from orchestrator.run()
     mockStats = {
@@ -110,9 +103,9 @@ describe('main.run()', () => {
       reload: vi.fn().mockResolvedValue(undefined),
       run: vi.fn().mockResolvedValue(mockStats)
     }
-    vi.mocked(CleanupOrchestrator).mockImplementation(
-      function () { return mockOrchestrator } as any
-    )
+    vi.mocked(CleanupOrchestrator).mockImplementation(function () {
+      return mockOrchestrator
+    } as any)
 
     // Global accumulator stats - tracks via add()
     globalStats = {
@@ -122,9 +115,9 @@ describe('main.run()', () => {
       print: vi.fn(),
       add: vi.fn().mockReturnThis()
     }
-    vi.mocked(CleanupTaskStatistics).mockImplementation(
-      function () { return globalStats } as any
-    )
+    vi.mocked(CleanupTaskStatistics).mockImplementation(function () {
+      return globalStats
+    } as any)
 
     // Auth: by default behave as a valid PAT (oauth token type)
     mockAuth = vi.fn().mockResolvedValue({ tokenType: 'oauth', token: 'pat' })
@@ -162,9 +155,55 @@ describe('main.run()', () => {
       expect(mockPackageRepo.getPackageList).not.toHaveBeenCalled()
       // Three orchestrators built, one per package
       expect(vi.mocked(CleanupOrchestrator)).toHaveBeenCalledTimes(3)
-      expect(vi.mocked(CleanupOrchestrator).mock.calls.map(c => c[1])).toEqual(
-        ['a', 'b', 'c']
+      expect(vi.mocked(CleanupOrchestrator).mock.calls.map(c => c[1])).toEqual([
+        'a',
+        'b',
+        'c'
+      ])
+    })
+
+    // Regression: issue #103 - YAML folding (`>-`) preserves whitespace
+    // between comma-separated package names. Make sure we trim it off and
+    // drop any empty entries from stray commas.
+    it('trims whitespace and skips empty entries when splitting (issue #103)', async () => {
+      mockBuildConfig.mockResolvedValue(
+        defaultConfig({
+          expandPackages: false,
+          package: ' a , b ,, c, '
+        })
       )
+
+      await run()
+
+      expect(vi.mocked(CleanupOrchestrator).mock.calls.map(c => c[1])).toEqual([
+        'a',
+        'b',
+        'c'
+      ])
+    })
+
+    it('trims whitespace in wildcard patterns when expandPackages=true', async () => {
+      mockBuildConfig.mockResolvedValue(
+        defaultConfig({
+          expandPackages: true,
+          useRegex: false,
+          package: 'pkg-*, other-*'
+        })
+      )
+      mockPackageRepo.getPackageList.mockResolvedValue([
+        'pkg-a',
+        'other-b',
+        'unrelated'
+      ])
+
+      await run()
+
+      // Both wildcard patterns should match after trim - if the leading
+      // space was kept on `other-*`, wcmatch would never match `other-b`.
+      expect(vi.mocked(CleanupOrchestrator).mock.calls.map(c => c[1])).toEqual([
+        'pkg-a',
+        'other-b'
+      ])
     })
 
     it('uses wildcard match when expandPackages=true and useRegex=false', async () => {
@@ -184,9 +223,10 @@ describe('main.run()', () => {
       await run()
 
       expect(mockPackageRepo.getPackageList).toHaveBeenCalled()
-      expect(vi.mocked(CleanupOrchestrator).mock.calls.map(c => c[1])).toEqual(
-        ['pkg-a', 'pkg-b']
-      )
+      expect(vi.mocked(CleanupOrchestrator).mock.calls.map(c => c[1])).toEqual([
+        'pkg-a',
+        'pkg-b'
+      ])
     })
 
     it('uses regex when expandPackages=true and useRegex=true', async () => {
@@ -206,9 +246,10 @@ describe('main.run()', () => {
 
       await run()
 
-      expect(vi.mocked(CleanupOrchestrator).mock.calls.map(c => c[1])).toEqual(
-        ['pkg-a', 'pkg-b']
-      )
+      expect(vi.mocked(CleanupOrchestrator).mock.calls.map(c => c[1])).toEqual([
+        'pkg-a',
+        'pkg-b'
+      ])
     })
 
     it('fails when expandPackages=true but token is not a PAT', async () => {

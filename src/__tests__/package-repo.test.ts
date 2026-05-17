@@ -1,4 +1,3 @@
- 
 import {
   describe,
   it,
@@ -57,7 +56,9 @@ const makeMockOctokit = (): MockOctokit => ({
  * Wraps an array of "pages" (each being a paginate response of shape {data: T[]})
  * as an async iterable that mirrors what octokit.paginate.iterator returns.
  */
-const asAsyncIterable = <T>(pages: Array<{ data: T[] }>): AsyncIterable<{ data: T[] }> => ({
+const asAsyncIterable = <T>(
+  pages: Array<{ data: T[] }>
+): AsyncIterable<{ data: T[] }> => ({
   async *[Symbol.asyncIterator]() {
     for (const page of pages) {
       yield page
@@ -237,8 +238,10 @@ describe('PackageRepo', () => {
         expect.stringContaining('[pkg] Loaded package payloads')
       )
       // JSON.stringify of the package should appear somewhere
-      const allInfoCalls = (core.info as MockedFunction<typeof core.info>).mock
-        .calls.flat()
+      const allInfoCalls = (
+        core.info as MockedFunction<typeof core.info>
+      ).mock.calls
+        .flat()
         .join('\n')
       expect(allInfoCalls).toContain('"id": 1')
     })
@@ -349,6 +352,23 @@ describe('PackageRepo', () => {
 
       await expect(repo.loadPackages('pkg', false)).rejects.toBe(err)
       expect(core.warning).not.toHaveBeenCalled()
+    })
+
+    // The lastDeleteResult flag tolerates a single 404 after a real delete.
+    // If a PackageRepo is ever reused across packages, a stale `false` left
+    // from a prior cycle would cause the next package's first 404 to fail
+    // instead of being tolerated. loadPackages() acts as the cycle boundary
+    // and should reset the flag.
+    it('resets lastDeleteResult on each fresh load', async () => {
+      const repo = new PackageRepo(buildConfig(), octokitClient)
+      mockOctokit.paginate.iterator.mockReturnValue(asAsyncIterable([]))
+
+      // Simulate a tolerated 404 from a previous delete operation
+      repo.lastDeleteResult = false
+
+      await repo.loadPackages('pkg', false)
+
+      expect(repo.lastDeleteResult).toBe(true)
     })
   })
 
