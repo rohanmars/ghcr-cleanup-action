@@ -147,6 +147,34 @@ describe('Registry', () => {
       )
     })
 
+    it('throws a generic error without leaking the token-service response body', async () => {
+      // 401 challenge, then a token exchange whose body carries a
+      // credential under a key we do not read (access_token). The thrown
+      // message must NOT echo that body into the (possibly public) log.
+      mockAxiosInstance.get.mockRejectedValueOnce(
+        fakeAxiosError({
+          status: 401,
+          headers: {
+            'www-authenticate':
+              'Bearer realm="https://ghcr.io/token",service="ghcr.io",scope="repository:test-owner/pkg:pull"'
+          }
+        })
+      )
+      mockAxiosInstance.get.mockResolvedValueOnce({
+        data: { access_token: 'super-secret-credential' }
+      })
+
+      let message = ''
+      try {
+        await registry.login('pkg')
+        throw new Error('expected login to reject')
+      } catch (e) {
+        message = (e as Error).message
+      }
+      expect(message).toMatch(/login failed: token service returned no token/)
+      expect(message).not.toContain('super-secret-credential')
+    })
+
     it('rethrows non-401 axios errors instead of swallowing them', async () => {
       mockAxiosInstance.get.mockRejectedValueOnce(
         fakeAxiosError({ status: 500 })

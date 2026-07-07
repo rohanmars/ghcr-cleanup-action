@@ -144,8 +144,11 @@ export class Registry {
                 core.info('authentication challenge succeded')
               }
             } else {
+              // Do not stringify tokenResponse into the message — an
+              // auth-endpoint body can carry a credential, and this
+              // reaches the (possibly public) job log via setFailed.
               throw new Error(
-                `${this.baseUrl} login failed: ${JSON.stringify(tokenResponse)}`
+                `${this.baseUrl} login failed: token service returned no token`
               )
             }
           } else {

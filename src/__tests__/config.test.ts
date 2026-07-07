@@ -116,6 +116,14 @@ describe('Config', () => {
       expect(config.repoType).toBe('Organization')
     })
 
+    it('registers the token with the runner log masker', async () => {
+      process.env.GITHUB_REPOSITORY = 'test-owner/test-repo'
+
+      await buildConfig()
+
+      expect(core.setSecret).toHaveBeenCalledWith('test-token')
+    })
+
     it('should auto-populate from GITHUB_REPOSITORY env var', async () => {
       process.env.GITHUB_REPOSITORY = 'auto-owner/auto-repo'
       mockGetInput.mockImplementation((name: string) => {

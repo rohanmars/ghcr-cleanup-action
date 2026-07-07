@@ -55601,6 +55601,10 @@ class Config {
 }
 async function buildConfig() {
     const token = getInput('token', { required: true });
+    // Register the token with the runner's log masker. Values arriving via
+    // ${{ secrets.* }} are masked already; this covers any that didn't
+    // (hardcoded, or passed through an env/output chain that broke the taint).
+    core_setSecret(token);
     const config = new Config();
     config.token = token;
     config.owner = getInput('owner');
@@ -111123,7 +111127,10 @@ class Registry {
                             }
                         }
                         else {
-                            throw new Error(`${this.baseUrl} login failed: ${JSON.stringify(tokenResponse)}`);
+                            // Do not stringify tokenResponse into the message — an
+                            // auth-endpoint body can carry a credential, and this
+                            // reaches the (possibly public) job log via setFailed.
+                            throw new Error(`${this.baseUrl} login failed: token service returned no token`);
                         }
                     }
                     else {
@@ -112688,9 +112695,10 @@ async function run() {
         await action.run();
     }
     catch (error) {
-        // Fail the workflow run if an error occurs
-        if (error instanceof Error)
-            setFailed(error.message);
+        // Fail the workflow run if an error occurs. Handle non-Error throws
+        // too (string/object rejections, cross-realm Errors) — swallowing
+        // them would leave an aborted cleanup reporting success.
+        setFailed(error instanceof Error ? error.message : String(error));
     }
 }
 class CleanupAction {

@@ -155,10 +155,12 @@ describe('main.run()', () => {
       expect(core.setFailed).not.toHaveBeenCalled()
     })
 
-    it('does not call setFailed for non-Error throws', async () => {
+    it('reports non-Error throws via core.setFailed (fail-closed)', async () => {
+      // A string/object rejection must still fail the run — swallowing it
+      // would leave an aborted cleanup reporting success.
       mockBuildConfig.mockRejectedValueOnce('a string, not an Error')
       await run()
-      expect(core.setFailed).not.toHaveBeenCalled()
+      expect(core.setFailed).toHaveBeenCalledWith('a string, not an Error')
     })
   })
 

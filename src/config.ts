@@ -54,6 +54,10 @@ export class Config {
 
 export async function buildConfig(): Promise<Config> {
   const token: string = core.getInput('token', { required: true })
+  // Register the token with the runner's log masker. Values arriving via
+  // ${{ secrets.* }} are masked already; this covers any that didn't
+  // (hardcoded, or passed through an env/output chain that broke the taint).
+  core.setSecret(token)
   const config = new Config()
   config.token = token
   config.owner = core.getInput('owner')

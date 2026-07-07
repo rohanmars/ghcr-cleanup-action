@@ -27,8 +27,10 @@ export async function run(): Promise<void> {
     const action = new CleanupAction(config, octokitClient)
     await action.run()
   } catch (error) {
-    // Fail the workflow run if an error occurs
-    if (error instanceof Error) core.setFailed(error.message)
+    // Fail the workflow run if an error occurs. Handle non-Error throws
+    // too (string/object rejections, cross-realm Errors) — swallowing
+    // them would leave an aborted cleanup reporting success.
+    core.setFailed(error instanceof Error ? error.message : String(error))
   }
 }
 

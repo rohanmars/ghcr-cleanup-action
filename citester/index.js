@@ -48504,6 +48504,10 @@ class Config {
 }
 async function buildConfig() {
     const token = core.getInput('token', { required: true });
+    // Register the token with the runner's log masker. Values arriving via
+    // ${{ secrets.* }} are masked already; this covers any that didn't
+    // (hardcoded, or passed through an env/output chain that broke the taint).
+    core.setSecret(token);
     const config = new Config();
     config.token = token;
     config.owner = core.getInput('owner');
@@ -108704,7 +108708,10 @@ class Registry {
                             }
                         }
                         else {
-                            throw new Error(`${this.baseUrl} login failed: ${JSON.stringify(tokenResponse)}`);
+                            // Do not stringify tokenResponse into the message — an
+                            // auth-endpoint body can carry a credential, and this
+                            // reaches the (possibly public) job log via setFailed.
+                            throw new Error(`${this.baseUrl} login failed: token service returned no token`);
                         }
                     }
                     else {
