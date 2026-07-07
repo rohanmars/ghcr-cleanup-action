@@ -84,6 +84,21 @@ class CleanupAction {
         const isTagMatch = wcmatch(patterns)
         targetPackages = packagesInUse.filter(name => isTagMatch(name))
       }
+
+      // Owner-wide selection deserves a loud callout: delete-untagged
+      // defaults to true when no other rule is set, so a bare "*"
+      // package pattern is one line of config away from deleting
+      // untagged images in every package the PAT can see. Keyed on the
+      // outcome (matched everything) rather than the pattern's
+      // spelling, so ".*" and friends trigger it too.
+      if (
+        targetPackages.length > 1 &&
+        targetPackages.length === packagesInUse.length
+      ) {
+        core.warning(
+          `Package pattern "${this.config.package}" matched all ${targetPackages.length} packages owned by ${this.config.owner}. The configured cleanup rules will run against every one of them — use dry-run: true to preview the result.`
+        )
+      }
     } else {
       targetPackages = this.config.package
         .split(',')

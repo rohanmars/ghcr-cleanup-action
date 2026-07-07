@@ -247,6 +247,67 @@ describe('main.run()', () => {
       ])
     })
 
+    it('warns when the package pattern matches every package the token can see', async () => {
+      mockBuildConfig.mockResolvedValue(
+        defaultConfig({
+          expandPackages: true,
+          useRegex: false,
+          package: '*'
+        })
+      )
+      mockPackageRepo.getPackageList.mockResolvedValue([
+        'pkg-a',
+        'pkg-b',
+        'pkg-c'
+      ])
+
+      await run()
+
+      expect(core.warning).toHaveBeenCalledWith(
+        expect.stringContaining('matched all 3 packages')
+      )
+    })
+
+    it('does not warn when the pattern matches only a subset of packages', async () => {
+      mockBuildConfig.mockResolvedValue(
+        defaultConfig({
+          expandPackages: true,
+          useRegex: false,
+          package: 'pkg-*'
+        })
+      )
+      mockPackageRepo.getPackageList.mockResolvedValue([
+        'pkg-a',
+        'pkg-b',
+        'other-c'
+      ])
+
+      await run()
+
+      expect(core.warning).not.toHaveBeenCalledWith(
+        expect.stringContaining('matched all')
+      )
+    })
+
+    it('does not warn when the owner has a single package', async () => {
+      // A one-package owner "matches everything" trivially — warning
+      // there would be pure noise for the common single-repo setup.
+      mockBuildConfig.mockResolvedValue(
+        defaultConfig({
+          expandPackages: true,
+          useRegex: false,
+          package: '*'
+        })
+      )
+      mockPackageRepo.getPackageList.mockResolvedValue(['pkg-a'])
+
+      await run()
+
+      expect(core.warning).not.toHaveBeenCalledWith(
+        expect.stringContaining('matched all')
+      )
+    })
+
     it('uses regex when expandPackages=true and useRegex=true', async () => {
       mockBuildConfig.mockResolvedValue(
         defaultConfig({
