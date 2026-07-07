@@ -15,6 +15,7 @@ import {
   parentDigestFromReferrerTag,
   SHA256_DIGEST_LENGTH,
   validateUserRegex,
+  warnIfUnanchoredRegex,
   MAX_USER_REGEX_LENGTH,
   runWithConcurrency
 } from '../utils'
@@ -390,6 +391,26 @@ describe('utils', () => {
       // Boundary case: the cap is inclusive (1000 chars allowed).
       const atLimit = 'a'.repeat(MAX_USER_REGEX_LENGTH)
       expect(() => validateUserRegex(atLimit, 'package')).not.toThrow()
+    })
+  })
+
+  describe('warnIfUnanchoredRegex', () => {
+    it('warns for a fully unanchored pattern', () => {
+      warnIfUnanchoredRegex('1.0', 'delete-tags')
+      expect(core.warning).toHaveBeenCalledWith(
+        expect.stringMatching(/^delete-tags:.*unanchored/)
+      )
+    })
+
+    it('warns when only one end is anchored', () => {
+      warnIfUnanchoredRegex('^v1.*', 'delete-tags')
+      warnIfUnanchoredRegex('.*-rc$', 'exclude-tags')
+      expect(core.warning).toHaveBeenCalledTimes(2)
+    })
+
+    it('stays silent for an anchored pattern', () => {
+      warnIfUnanchoredRegex('^release-[0-9]+$', 'package')
+      expect(core.warning).not.toHaveBeenCalled()
     })
   })
 

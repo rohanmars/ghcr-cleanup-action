@@ -39,6 +39,25 @@ export function validateUserRegex(pattern: string, source: string): void {
 }
 
 /**
+ * Warn when a regex-mode pattern is unanchored. Regex patterns are
+ * applied with `.test()`, which matches anywhere in the value (`1.0`
+ * also matches `21.0.5`) — unlike wildcard mode, which always matches
+ * the whole string. Warn rather than fail: existing workflows may rely
+ * on substring matching deliberately.
+ *
+ * The check is a heuristic (a pattern ending in an escaped `\$` reads
+ * as anchored, `^a|b` anchors only one alternative) — acceptable for
+ * an advisory warning.
+ */
+export function warnIfUnanchoredRegex(pattern: string, source: string): void {
+  if (!pattern.startsWith('^') || !pattern.endsWith('$')) {
+    core.warning(
+      `${source}: regex pattern "${pattern}" is unanchored, so it matches anywhere in the value (e.g. "1.0" also matches "21.0.5"). Use ^...$ to match the whole tag or package name.`
+    )
+  }
+}
+
+/**
  * Recover the parent image digest from a cosign/sigstore referrer tag.
  *
  * Referrer tags follow the convention `sha256-<64 hex>.<suffix>` where the

@@ -48677,6 +48677,21 @@ async function buildConfig() {
             validateUserRegex(config.package, 'package');
         }
     }
+    // Separate from the safety checks above (and not silenced by
+    // skip-regex-checks): substring matching is a semantics footgun, not
+    // a resource-safety issue, so the heads-up stays on even for authors
+    // who opted out of the ReDoS/length guards.
+    if (config.useRegex) {
+        if (config.deleteTags) {
+            warnIfUnanchoredRegex(config.deleteTags, 'delete-tags');
+        }
+        if (config.excludeTags) {
+            warnIfUnanchoredRegex(config.excludeTags, 'exclude-tags');
+        }
+        if (config.expandPackages && config.package) {
+            warnIfUnanchoredRegex(config.package, 'package');
+        }
+    }
     if (core.getInput('registry-url')) {
         config.registryUrl = core.getInput('registry-url');
         if (!config.registryUrl.endsWith('/')) {
@@ -108904,7 +108919,7 @@ class Registry {
 /* harmony export */   kS: () => (/* binding */ consoleLogger),
 /* harmony export */   xy: () => (/* binding */ parseChallenge)
 /* harmony export */ });
-/* unused harmony exports SHA256_DIGEST_LENGTH, MAX_USER_REGEX_LENGTH, validateUserRegex, BufferedLogger, DEFAULT_LISTING_LIMIT, MapPrinter, CleanupTaskStatistics */
+/* unused harmony exports SHA256_DIGEST_LENGTH, MAX_USER_REGEX_LENGTH, validateUserRegex, warnIfUnanchoredRegex, BufferedLogger, DEFAULT_LISTING_LIMIT, MapPrinter, CleanupTaskStatistics */
 /* harmony import */ var _actions_core__WEBPACK_IMPORTED_MODULE_0__ = __nccwpck_require__(3838);
 /* harmony import */ var safe_regex2__WEBPACK_IMPORTED_MODULE_1__ = __nccwpck_require__(8700);
 /* harmony import */ var safe_regex2__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__nccwpck_require__.n(safe_regex2__WEBPACK_IMPORTED_MODULE_1__);
@@ -108938,6 +108953,22 @@ function validateUserRegex(pattern, source) {
     }
     if (!safeRegex(pattern)) {
         throw new Error(`${source}: regex pattern rejected as ReDoS-prone (nested quantifiers). Simplify the pattern or pre-process the input.`);
+    }
+}
+/**
+ * Warn when a regex-mode pattern is unanchored. Regex patterns are
+ * applied with `.test()`, which matches anywhere in the value (`1.0`
+ * also matches `21.0.5`) — unlike wildcard mode, which always matches
+ * the whole string. Warn rather than fail: existing workflows may rely
+ * on substring matching deliberately.
+ *
+ * The check is a heuristic (a pattern ending in an escaped `\$` reads
+ * as anchored, `^a|b` anchors only one alternative) — acceptable for
+ * an advisory warning.
+ */
+function warnIfUnanchoredRegex(pattern, source) {
+    if (!pattern.startsWith('^') || !pattern.endsWith('$')) {
+        core.warning(`${source}: regex pattern "${pattern}" is unanchored, so it matches anywhere in the value (e.g. "1.0" also matches "21.0.5"). Use ^...$ to match the whole tag or package name.`);
     }
 }
 /**

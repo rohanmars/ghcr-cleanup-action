@@ -162,15 +162,15 @@ when the target package isn't linked to any repository at all.
 
 ### Other
 
-| Option              | Default                  | Description                                                                                                                |
-| ------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
-| `use-regex`         | `false`                  | Treat `delete-tags`, `exclude-tags`, and `package(s)` as regular expression patterns.                                      |
-| `skip-regex-checks` | `false`                  | Skip the length and ReDoS safety checks on regular expression patterns. Use only for intentionally large/complex patterns. |
-| `dry-run`           | `false`                  | Log everything that would be deleted without making changes.                                                               |
-| `validate`          | `false`                  | After cleanup, verify all multi-arch images have their platform children.                                                  |
-| `registry-url`      | `https://ghcr.io/`       | Container registry URL.                                                                                                    |
-| `github-api-url`    | `https://api.github.com` | GitHub API URL.                                                                                                            |
-| `log-level`         | `info`                   | One of `error`, `warn`, `info`, `debug`.                                                                                   |
+| Option              | Default                  | Description                                                                                                                                                                                                                                              |
+| ------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `use-regex`         | `false`                  | Treat `delete-tags`, `exclude-tags`, and `package(s)` as regular expression patterns. Unlike wildcard mode, patterns are unanchored: they match anywhere in the value (`1.0` also matches `21.0.5`). Use `^...$` to match the whole tag or package name. |
+| `skip-regex-checks` | `false`                  | Skip the length and ReDoS safety checks on regular expression patterns. Use only for intentionally large/complex patterns.                                                                                                                               |
+| `dry-run`           | `false`                  | Log everything that would be deleted without making changes.                                                                                                                                                                                             |
+| `validate`          | `false`                  | After cleanup, verify all multi-arch images have their platform children.                                                                                                                                                                                |
+| `registry-url`      | `https://ghcr.io/`       | Container registry URL.                                                                                                                                                                                                                                  |
+| `github-api-url`    | `https://api.github.com` | GitHub API URL.                                                                                                                                                                                                                                          |
+| `log-level`         | `info`                   | One of `error`, `warn`, `info`, `debug`.                                                                                                                                                                                                                 |
 
 ### Conventions
 

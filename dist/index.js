@@ -50679,6 +50679,22 @@ function validateUserRegex(pattern, source) {
     }
 }
 /**
+ * Warn when a regex-mode pattern is unanchored. Regex patterns are
+ * applied with `.test()`, which matches anywhere in the value (`1.0`
+ * also matches `21.0.5`) — unlike wildcard mode, which always matches
+ * the whole string. Warn rather than fail: existing workflows may rely
+ * on substring matching deliberately.
+ *
+ * The check is a heuristic (a pattern ending in an escaped `\$` reads
+ * as anchored, `^a|b` anchors only one alternative) — acceptable for
+ * an advisory warning.
+ */
+function warnIfUnanchoredRegex(pattern, source) {
+    if (!pattern.startsWith('^') || !pattern.endsWith('$')) {
+        warning(`${source}: regex pattern "${pattern}" is unanchored, so it matches anywhere in the value (e.g. "1.0" also matches "21.0.5"). Use ^...$ to match the whole tag or package name.`);
+    }
+}
+/**
  * Recover the parent image digest from a cosign/sigstore referrer tag.
  *
  * Referrer tags follow the convention `sha256-<64 hex>.<suffix>` where the
@@ -55756,6 +55772,21 @@ async function buildConfig() {
         }
         if (config.expandPackages && config.package) {
             validateUserRegex(config.package, 'package');
+        }
+    }
+    // Separate from the safety checks above (and not silenced by
+    // skip-regex-checks): substring matching is a semantics footgun, not
+    // a resource-safety issue, so the heads-up stays on even for authors
+    // who opted out of the ReDoS/length guards.
+    if (config.useRegex) {
+        if (config.deleteTags) {
+            warnIfUnanchoredRegex(config.deleteTags, 'delete-tags');
+        }
+        if (config.excludeTags) {
+            warnIfUnanchoredRegex(config.excludeTags, 'exclude-tags');
+        }
+        if (config.expandPackages && config.package) {
+            warnIfUnanchoredRegex(config.package, 'package');
         }
     }
     if (getInput('registry-url')) {

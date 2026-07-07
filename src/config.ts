@@ -1,5 +1,9 @@
 import * as core from '@actions/core'
-import { MapPrinter, validateUserRegex } from './utils.js'
+import {
+  MapPrinter,
+  validateUserRegex,
+  warnIfUnanchoredRegex
+} from './utils.js'
 import { OctokitClient } from './octokit-client.js'
 import humanInterval from 'human-interval'
 
@@ -239,6 +243,22 @@ export async function buildConfig(): Promise<Config> {
     }
     if (config.expandPackages && config.package) {
       validateUserRegex(config.package, 'package')
+    }
+  }
+
+  // Separate from the safety checks above (and not silenced by
+  // skip-regex-checks): substring matching is a semantics footgun, not
+  // a resource-safety issue, so the heads-up stays on even for authors
+  // who opted out of the ReDoS/length guards.
+  if (config.useRegex) {
+    if (config.deleteTags) {
+      warnIfUnanchoredRegex(config.deleteTags, 'delete-tags')
+    }
+    if (config.excludeTags) {
+      warnIfUnanchoredRegex(config.excludeTags, 'exclude-tags')
+    }
+    if (config.expandPackages && config.package) {
+      warnIfUnanchoredRegex(config.package, 'package')
     }
   }
 
