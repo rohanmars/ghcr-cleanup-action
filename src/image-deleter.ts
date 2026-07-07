@@ -157,6 +157,16 @@ export class ImageDeleter {
       }
     )
 
+    // Dry run: putManifest above was a no-op, so each tag still points
+    // at the live image. Reloading and resolving tags here would find
+    // the live image digests and log them as being deleted — a
+    // misleading preview (a real run deletes only the newly-created
+    // placeholder versions). The tag list logged above is the preview.
+    if (this.context.config.dryRun) {
+      core.endGroup()
+      return true
+    }
+
     // ONE reload to discover all newly-created empty versions in one
     // paginated sweep, instead of per-tag.
     await this.context.packageRepo.loadPackages(

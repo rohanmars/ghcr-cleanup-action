@@ -122,6 +122,31 @@ describe('ImageDeleter', () => {
       )
     })
 
+    it('skips the reload + placeholder-delete phase under dry-run', async () => {
+      // With dry-run on, putManifest is a no-op, so the tags still point
+      // at the live images. Resolving tags after the reload would find
+      // the live digests and log them as being deleted — the preview
+      // must stop after the untag (PUT) phase.
+      context.config.dryRun = true
+      const untagOps = new Map([['digest1', ['v1.0']]])
+
+      mockPackageRepo.getPackageByDigest.mockReturnValue({
+        name: 'digest1',
+        metadata: { container: { tags: ['v1.0', 'latest'] } }
+      })
+
+      mockRegistry.getRawManifestByDigest.mockResolvedValue({
+        manifests: []
+      })
+
+      const result = await deleter.performUntagging(untagOps)
+
+      expect(result).toBe(true)
+      expect(mockRegistry.putManifest).toHaveBeenCalledTimes(1)
+      expect(mockPackageRepo.loadPackages).not.toHaveBeenCalled()
+      expect(mockPackageRepo.deletePackageVersion).not.toHaveBeenCalled()
+    })
+
     it('should skip untagging if only one tag remains', async () => {
       const untagOps = new Map([['digest1', ['v1.0']]])
 

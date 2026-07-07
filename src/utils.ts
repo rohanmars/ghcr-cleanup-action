@@ -11,9 +11,11 @@ export const MAX_USER_REGEX_LENGTH = 1000
 
 /**
  * Validate a user-supplied regex pattern. Reject patterns that are
- * suspiciously long or that safe-regex2 flags as ReDoS-prone (nested
- * quantifiers, ambiguous alternation, etc.) before they reach
- * `new RegExp(...)` and run against tag/digest/package strings.
+ * suspiciously long or that safe-regex2 flags as ReDoS-prone before
+ * they reach `new RegExp(...)` and run against tag/digest/package
+ * strings. safe-regex2 only analyses star height (nested quantifiers
+ * like `(a+)+`); it does not catch every dangerous pattern — e.g.
+ * ambiguous alternation such as `(a|a)*` passes.
  *
  * Workflow authors are the effective trust boundary, so the primary
  * goal here is preventing self-foot-shooting (a copy-pasted pattern
@@ -31,7 +33,7 @@ export function validateUserRegex(pattern: string, source: string): void {
   }
   if (!safeRegex(pattern)) {
     throw new Error(
-      `${source}: regex pattern rejected as ReDoS-prone (nested quantifiers or ambiguous alternation). Simplify the pattern or pre-process the input.`
+      `${source}: regex pattern rejected as ReDoS-prone (nested quantifiers). Simplify the pattern or pre-process the input.`
     )
   }
 }

@@ -50656,9 +50656,11 @@ const SHA256_DIGEST_LENGTH = 'sha256:'.length + 64;
 const MAX_USER_REGEX_LENGTH = 1000;
 /**
  * Validate a user-supplied regex pattern. Reject patterns that are
- * suspiciously long or that safe-regex2 flags as ReDoS-prone (nested
- * quantifiers, ambiguous alternation, etc.) before they reach
- * `new RegExp(...)` and run against tag/digest/package strings.
+ * suspiciously long or that safe-regex2 flags as ReDoS-prone before
+ * they reach `new RegExp(...)` and run against tag/digest/package
+ * strings. safe-regex2 only analyses star height (nested quantifiers
+ * like `(a+)+`); it does not catch every dangerous pattern — e.g.
+ * ambiguous alternation such as `(a|a)*` passes.
  *
  * Workflow authors are the effective trust boundary, so the primary
  * goal here is preventing self-foot-shooting (a copy-pasted pattern
@@ -50673,7 +50675,7 @@ function validateUserRegex(pattern, source) {
         throw new Error(`${source}: regex pattern exceeds maximum length of ${MAX_USER_REGEX_LENGTH} characters (got ${pattern.length})`);
     }
     if (!safe_regex2_default()(pattern)) {
-        throw new Error(`${source}: regex pattern rejected as ReDoS-prone (nested quantifiers or ambiguous alternation). Simplify the pattern or pre-process the input.`);
+        throw new Error(`${source}: regex pattern rejected as ReDoS-prone (nested quantifiers). Simplify the pattern or pre-process the input.`);
     }
 }
 /**
@@ -112184,6 +112186,15 @@ class ImageDeleter {
             info(`${tag}`);
             await this.context.registry.putManifest(tag, newManifest, isMultiArch);
         });
+        // Dry run: putManifest above was a no-op, so each tag still points
+        // at the live image. Reloading and resolving tags here would find
+        // the live image digests and log them as being deleted — a
+        // misleading preview (a real run deletes only the newly-created
+        // placeholder versions). The tag list logged above is the preview.
+        if (this.context.config.dryRun) {
+            endGroup();
+            return true;
+        }
         // ONE reload to discover all newly-created empty versions in one
         // paginated sweep, instead of per-tag.
         await this.context.packageRepo.loadPackages(this.context.targetPackage, false);
