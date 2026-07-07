@@ -24,9 +24,14 @@ rules:
   # read-only for fork PRs - breaking the test design. This repo only uses
   # ghcr.io for ephemeral CI test artifacts; nothing is published from here, so
   # the trade-off favours integration coverage over zizmor's blanket warning.
-  # Safety: the workflow never checks out the PR's HEAD - actions/checkout
-  # defaults to the base ref under pull_request_target, so untrusted PR code
-  # does not execute with secrets.
+  # Safety: the workflow DOES check out and run the PR's HEAD (ref:
+  # head.sha), so the controls are instead:
+  # 1. The pr-integration-tests environment gate - every job that runs
+  #    fork code with packages:write, GHCR_PAT, or id-token waits on
+  #    maintainer approval via pr-integration-tests-gate.
+  # 2. general-tests, the only job that runs fork code before approval,
+  #    holds a read-only GITHUB_TOKEN, sees no secrets, and checks out
+  #    with persist-credentials: false.
   dangerous-triggers:
     ignore:
       - ci.yml
