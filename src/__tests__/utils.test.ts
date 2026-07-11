@@ -17,7 +17,8 @@ import {
   validateUserRegex,
   warnIfUnanchoredRegex,
   MAX_USER_REGEX_LENGTH,
-  runWithConcurrency
+  runWithConcurrency,
+  sleep
 } from '../utils'
 
 // Mock @actions/core
@@ -461,6 +462,25 @@ describe('utils', () => {
         seen.push(n)
       })
       expect(seen.sort((a, b) => a - b)).toEqual([1, 2])
+    })
+  })
+
+  describe('sleep', () => {
+    it('resolves after the given delay', async () => {
+      vi.useFakeTimers()
+      try {
+        let done = false
+        const p = (async (): Promise<void> => {
+          await sleep(1000)
+          done = true
+        })()
+        expect(done).toBe(false)
+        await vi.advanceTimersByTimeAsync(1000)
+        await p
+        expect(done).toBe(true)
+      } finally {
+        vi.useRealTimers()
+      }
     })
   })
 })

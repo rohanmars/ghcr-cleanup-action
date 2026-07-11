@@ -108926,7 +108926,7 @@ class Registry {
 /* harmony export */   kS: () => (/* binding */ consoleLogger),
 /* harmony export */   xy: () => (/* binding */ parseChallenge)
 /* harmony export */ });
-/* unused harmony exports SHA256_DIGEST_LENGTH, MAX_USER_REGEX_LENGTH, validateUserRegex, warnIfUnanchoredRegex, BufferedLogger, DEFAULT_LISTING_LIMIT, MapPrinter, CleanupTaskStatistics */
+/* unused harmony exports SHA256_DIGEST_LENGTH, MAX_USER_REGEX_LENGTH, validateUserRegex, warnIfUnanchoredRegex, BufferedLogger, DEFAULT_LISTING_LIMIT, MapPrinter, CleanupTaskStatistics, sleep */
 /* harmony import */ var _actions_core__WEBPACK_IMPORTED_MODULE_0__ = __nccwpck_require__(3838);
 /* harmony import */ var safe_regex2__WEBPACK_IMPORTED_MODULE_1__ = __nccwpck_require__(8700);
 /* harmony import */ var safe_regex2__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__nccwpck_require__.n(safe_regex2__WEBPACK_IMPORTED_MODULE_1__);
@@ -109172,6 +109172,10 @@ async function runWithConcurrency(items, concurrency, worker) {
         }
     };
     await Promise.all(Array.from({ length: limit }, launchOne));
+}
+/** Resolve after `ms` milliseconds. */
+async function sleep(ms) {
+    await new Promise(resolve => setTimeout(resolve, ms));
 }
 
 

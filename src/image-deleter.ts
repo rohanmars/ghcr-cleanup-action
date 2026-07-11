@@ -8,13 +8,22 @@ import {
   Logger,
   Manifest,
   ManifestEntry,
-  runWithConcurrency
+  runWithConcurrency,
+  sleep
 } from './utils.js'
 
 // Concurrency for the parallel PUT + DELETE phases of performUntagging.
 // Modest fan-out — ghcr.io accepts writes happily but writes are
 // account-quota relevant.
 const UNTAG_WRITE_CONCURRENCY = 5
+
+// Retry budget for discovering placeholder versions after the untag PUTs.
+// The Packages API list is eventually consistent with the registry, so a
+// freshly-created placeholder can lag — and until it appears, the tag
+// still resolves to its SOURCE image. Each attempt is a full reload;
+// between attempts we back off (linearly) to give ghcr time to converge.
+const UNTAG_RELOAD_MAX_ATTEMPTS = 4
+const UNTAG_RELOAD_BACKOFF_MS = 1000
 
 // Concurrency for child/referrer deletes spawned by a single deleteImage
 // call. The top-level deleteImages loop stays sequential — failures while
@@ -167,36 +176,78 @@ export class ImageDeleter {
       return true
     }
 
-    // ONE reload to discover all newly-created empty versions in one
-    // paginated sweep, instead of per-tag.
-    await this.context.packageRepo.loadPackages(
-      this.context.targetPackage,
-      false
-    )
+    // Discover the newly-created placeholder versions so we can delete
+    // them. Because the Packages API list is eventually consistent with
+    // the registry PUTs above, a placeholder may not appear immediately —
+    // and until it does, its tag still resolves to the SOURCE image.
+    // Deleting on that stale view would remove the source image and its
+    // other (unmatched, possibly excluded) tags instead of the empty
+    // placeholder. So reload until every tag resolves to a digest that
+    // differs from its source, retrying a few times; a whole-list reload
+    // re-checks every pending tag at once, since staleness is a property
+    // of the snapshot, not of individual tags.
+    const stillOnSource = ({ manifestDigest, tag }: UntagJob): boolean => {
+      const resolved = this.context.packageRepo.getDigestByTag(tag)
+      return resolved === undefined || resolved === manifestDigest
+    }
 
-    // Delete the newly-created empty versions in parallel.
-    await runWithConcurrency(jobs, UNTAG_WRITE_CONCURRENCY, async ({ tag }) => {
-      const untaggedDigest = this.context.packageRepo.getDigestByTag(tag)
-      if (!untaggedDigest) {
-        core.info(
-          `couldn't find newly created package for tag ${tag} to delete`
-        )
-        return
-      }
-      const id = this.context.packageRepo.getIdByDigest(untaggedDigest)
-      if (!id) {
-        core.info(
-          `couldn't find newly created package with digest ${untaggedDigest} to delete`
-        )
-        return
-      }
-      await this.context.packageRepo.deletePackageVersion(
+    let unresolved = jobs
+    for (let attempt = 1; ; attempt++) {
+      await this.context.packageRepo.loadPackages(
         this.context.targetPackage,
-        id,
-        untaggedDigest,
-        [tag]
+        false
       )
-    })
+      unresolved = unresolved.filter(stillOnSource)
+      if (unresolved.length === 0 || attempt >= UNTAG_RELOAD_MAX_ATTEMPTS) {
+        break
+      }
+      core.info(
+        `Untag: ${unresolved.length} placeholder(s) not yet listed; reloading (attempt ${attempt}/${UNTAG_RELOAD_MAX_ATTEMPTS})`
+      )
+      await sleep(UNTAG_RELOAD_BACKOFF_MS * attempt)
+    }
+
+    // Any tag still pointing at its source image never had its placeholder
+    // become visible. Skip its delete rather than remove the source image;
+    // the empty placeholder is harmless and gets reclaimed on a later run.
+    const skipTags = new Set(unresolved.map(j => j.tag))
+    for (const tag of skipTags) {
+      core.warning(
+        `Untag "${tag}": the empty placeholder never appeared in the package list, so its tag still resolves to the source image. Skipping its delete this run to avoid removing the source image; it will be reclaimed on a subsequent run.`
+      )
+    }
+
+    // Delete the placeholder versions (those that resolved to a fresh
+    // digest) in parallel.
+    const deletable = jobs.filter(j => !skipTags.has(j.tag))
+    await runWithConcurrency(
+      deletable,
+      UNTAG_WRITE_CONCURRENCY,
+      async ({ manifestDigest, tag }) => {
+        const untaggedDigest = this.context.packageRepo.getDigestByTag(tag)
+        // Belt-and-braces: never delete a version whose tag still resolves
+        // to the source image, even if the map shifted since the filter.
+        if (!untaggedDigest || untaggedDigest === manifestDigest) {
+          core.info(
+            `couldn't find newly created package for tag ${tag} to delete`
+          )
+          return
+        }
+        const id = this.context.packageRepo.getIdByDigest(untaggedDigest)
+        if (!id) {
+          core.info(
+            `couldn't find newly created package with digest ${untaggedDigest} to delete`
+          )
+          return
+        }
+        await this.context.packageRepo.deletePackageVersion(
+          this.context.targetPackage,
+          id,
+          untaggedDigest,
+          [tag]
+        )
+      }
+    )
 
     core.endGroup()
     return true

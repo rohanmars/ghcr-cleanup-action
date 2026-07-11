@@ -355,6 +355,11 @@ export async function runWithConcurrency<T>(
   await Promise.all(Array.from({ length: limit }, launchOne))
 }
 
+/** Resolve after `ms` milliseconds. */
+export async function sleep(ms: number): Promise<void> {
+  await new Promise(resolve => setTimeout(resolve, ms))
+}
+
 export interface Manifest {
   mediaType?: string
   schemaVersion?: number
