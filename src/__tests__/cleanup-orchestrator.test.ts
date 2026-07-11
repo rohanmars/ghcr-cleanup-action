@@ -407,6 +407,27 @@ describe('CleanupOrchestrator', () => {
       )
     })
 
+    it('processes BOTH partial and ghost images when both options are set', async () => {
+      // Regression: these used to be if/else, so enabling both silently
+      // dropped every ghost image. The two finders return disjoint sets,
+      // so both must run and both sets must be deleted.
+      config.deletePartialImages = true
+      config.deleteGhostImages = true
+      mockImageValidator.findPartialImages.mockResolvedValue(
+        new Set(['partial1'])
+      )
+      mockImageValidator.findGhostImages.mockResolvedValue(new Set(['ghost1']))
+
+      await orchestrator.run()
+
+      expect(mockImageValidator.findPartialImages).toHaveBeenCalled()
+      expect(mockImageValidator.findGhostImages).toHaveBeenCalled()
+      expect(mockImageDeleter.deleteImages).toHaveBeenCalledWith(
+        new Set(['partial1', 'ghost1']),
+        expect.any(Function)
+      )
+    })
+
     it('should process orphaned images when deleteOrphanedImages is true', async () => {
       config.deleteOrphanedImages = true
       const orphanedImages = new Set(['orphan1', 'orphan2'])
