@@ -74,9 +74,11 @@ export function parentDigestFromReferrerTag(tag: string): string | null {
   return digest.slice(0, SHA256_DIGEST_LENGTH)
 }
 
-export function parseChallenge(challenge: string): Map<string, string> {
+export function parseChallenge(
+  challenge: string | undefined
+): Map<string, string> {
   const attributes = new Map<string, string>()
-  if (challenge.startsWith('Bearer ')) {
+  if (challenge && challenge.startsWith('Bearer ')) {
     challenge = challenge.replace('Bearer ', '')
     const parts = challenge.split(',')
     for (const part of parts) {

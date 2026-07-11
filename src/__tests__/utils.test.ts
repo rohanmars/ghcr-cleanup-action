@@ -95,6 +95,13 @@ describe('utils', () => {
 
       expect(result.get('scope')).toBe('repository:user/test:pull=encoded==')
     })
+
+    it('returns an empty map for an undefined challenge instead of throwing', () => {
+      // A 401 with no www-authenticate header yields undefined here; the
+      // parser must not blow up on .startsWith.
+      expect(() => parseChallenge(undefined)).not.toThrow()
+      expect(parseChallenge(undefined).size).toBe(0)
+    })
   })
 
   describe('parentDigestFromReferrerTag', () => {

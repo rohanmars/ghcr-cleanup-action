@@ -133,6 +133,11 @@ export class Registry {
       if (isAxiosError(error) && error.response) {
         if (error.response?.status === 401) {
           const challenge = error.response?.headers['www-authenticate']
+          if (!challenge) {
+            throw new Error(
+              `${this.baseUrl} returned 401 without a www-authenticate challenge; cannot authenticate`
+            )
+          }
           const attributes = parseChallenge(challenge)
           if (isValidChallenge(attributes)) {
             const tokenResponse = await this.fetchRegistryToken(attributes)
@@ -310,6 +315,11 @@ export class Registry {
     } catch (error) {
       if (isAxiosError(error) && error.response?.status === 401) {
         const challenge = error.response.headers['www-authenticate']
+        if (!challenge) {
+          throw new Error(
+            `${this.baseUrl} returned 401 without a www-authenticate challenge; cannot obtain a push token`
+          )
+        }
         const attributes = parseChallenge(challenge)
         if (!isValidChallenge(attributes)) {
           throw new Error(`invalid www-authenticate challenge ${challenge}`)

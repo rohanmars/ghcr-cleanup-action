@@ -183,6 +183,18 @@ describe('Registry', () => {
       await expect(registry.login('pkg')).rejects.toBeDefined()
     })
 
+    it('throws a clear error when a 401 has no www-authenticate header', async () => {
+      // Proxy / misconfigured registry-url can 401 without a challenge;
+      // must not crash with an opaque "Cannot read properties of undefined".
+      mockAxiosInstance.get.mockRejectedValueOnce(
+        fakeAxiosError({ status: 401, headers: {} })
+      )
+
+      await expect(registry.login('pkg')).rejects.toThrow(
+        /401 without a www-authenticate challenge/
+      )
+    })
+
     it('rethrows non-axios errors', async () => {
       // Regression: an earlier catch only handled isAxiosError &&
       // error.response, so anything outside that shape silently resolved.
@@ -450,6 +462,16 @@ describe('Registry', () => {
       await expect(
         registry.putManifest('latest', { mediaType: 'x' }, false)
       ).rejects.toBeDefined()
+    })
+
+    it('throws a clear error when a push 401 has no www-authenticate header', async () => {
+      mockAxiosInstance.put.mockRejectedValueOnce(
+        fakeAxiosError({ status: 401, headers: {} })
+      )
+
+      await expect(
+        registry.putManifest('latest', { mediaType: 'x' }, false)
+      ).rejects.toThrow(/401 without a www-authenticate challenge/)
     })
 
     it('reuses a cached push token across calls without re-exchanging on 401', async () => {

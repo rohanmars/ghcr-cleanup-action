@@ -50714,7 +50714,7 @@ function parentDigestFromReferrerTag(tag) {
 }
 function parseChallenge(challenge) {
     const attributes = new Map();
-    if (challenge.startsWith('Bearer ')) {
+    if (challenge && challenge.startsWith('Bearer ')) {
         challenge = challenge.replace('Bearer ', '');
         const parts = challenge.split(',');
         for (const part of parts) {
@@ -111119,6 +111119,9 @@ class Registry {
             if (axios_isAxiosError(error) && error.response) {
                 if (error.response?.status === 401) {
                     const challenge = error.response?.headers['www-authenticate'];
+                    if (!challenge) {
+                        throw new Error(`${this.baseUrl} returned 401 without a www-authenticate challenge; cannot authenticate`);
+                    }
                     const attributes = parseChallenge(challenge);
                     if (isValidChallenge(attributes)) {
                         const tokenResponse = await this.fetchRegistryToken(attributes);
@@ -111274,6 +111277,9 @@ class Registry {
         catch (error) {
             if (axios_isAxiosError(error) && error.response?.status === 401) {
                 const challenge = error.response.headers['www-authenticate'];
+                if (!challenge) {
+                    throw new Error(`${this.baseUrl} returned 401 without a www-authenticate challenge; cannot obtain a push token`);
+                }
                 const attributes = parseChallenge(challenge);
                 if (!isValidChallenge(attributes)) {
                     throw new Error(`invalid www-authenticate challenge ${challenge}`);
