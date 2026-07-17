@@ -402,6 +402,29 @@ describe('Config', () => {
       )
     })
 
+    it('warns about an unanchored package pattern (expand-packages + regex)', async () => {
+      // The third wired branch: config.expandPackages && config.package.
+      process.env.GITHUB_REPOSITORY = 'test-owner/test-repo'
+      mockGetInput.mockImplementation((name: string) => {
+        const inputs: Record<string, string> = {
+          token: 'test-token',
+          package: 'pkg',
+          'use-regex': 'true',
+          'expand-packages': 'true'
+        }
+        return inputs[name] || ''
+      })
+      mockGetBooleanInput.mockImplementation(
+        (name: string) => name === 'use-regex' || name === 'expand-packages'
+      )
+
+      await buildConfig()
+
+      expect(core.warning).toHaveBeenCalledWith(
+        expect.stringMatching(/^package:.*unanchored/)
+      )
+    })
+
     it('still warns about unanchored patterns when skip-regex-checks is on', async () => {
       // The anchoring heads-up is about matching semantics, not regex
       // safety - opting out of the ReDoS/length guards must not mute it.

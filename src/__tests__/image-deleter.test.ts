@@ -282,6 +282,52 @@ describe('ImageDeleter', () => {
       expect(mockPackageRepo.loadPackages).toHaveBeenCalledTimes(4)
     })
 
+    it('in a mixed batch, deletes the visible placeholder and skips the still-stale one', async () => {
+      // Two tags on one source image: v1's placeholder becomes visible,
+      // v2's never does. The per-tag split must delete ONLY v1's
+      // placeholder and skip v2 — never touching the source image.
+      const untagOps = new Map([['digest1', ['v1', 'v2']]])
+      mockPackageRepo.getPackageByDigest.mockReturnValue({
+        name: 'digest1',
+        metadata: { container: { tags: ['v1', 'v2', 'latest'] } }
+      })
+      mockRegistry.getRawManifestByDigest.mockResolvedValue({
+        manifests: [{ digest: 'sha256:child' }]
+      })
+      // v1 resolves to a fresh placeholder; v2 stays pinned to the source.
+      mockPackageRepo.getDigestByTag.mockImplementation((tag: string) =>
+        tag === 'v1' ? 'sha256:empty-v1' : 'digest1'
+      )
+      // The source digest has a REAL id (999): a reverted (no-skip)
+      // implementation would resolve v2 to it and delete the source —
+      // so this test fails on revert, not just when the split is absent.
+      mockPackageRepo.getIdByDigest.mockImplementation((digest: string) =>
+        digest === 'sha256:empty-v1' ? 77 : 999
+      )
+
+      vi.useFakeTimers()
+      try {
+        const p = deleter.performUntagging(untagOps)
+        await vi.runAllTimersAsync()
+        await p
+      } finally {
+        vi.useRealTimers()
+      }
+
+      // Exactly one delete, on v1's placeholder — not the source digest.
+      expect(mockPackageRepo.deletePackageVersion).toHaveBeenCalledTimes(1)
+      expect(mockPackageRepo.deletePackageVersion).toHaveBeenCalledWith(
+        'test-package',
+        77,
+        'sha256:empty-v1',
+        ['v1']
+      )
+      // v2 is skipped with a warning; the source image is never deleted.
+      expect(core.warning).toHaveBeenCalledWith(
+        expect.stringContaining('Untag "v2"')
+      )
+    })
+
     it('annotates each PUT uniquely so digests differ', async () => {
       // The whole reason we can batch: byte-distinct manifests produce
       // distinct digests, so the new versions don't conflate.
