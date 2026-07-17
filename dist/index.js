@@ -111852,16 +111852,33 @@ class ImageValidator {
      * Find orphaned images (parent image doesn't exist). Covers both the
      * sha256-* fallback tag shape and OCI 1.1 subject-bearing referrers
      * whose subject is no longer in the repo.
+     *
+     * `excludeTags` (the expanded exclude list — matched tag and digest
+     * strings) is honored here even though orphans are reached outside the
+     * top-level filterSet: an orphan is a stand-alone leftover being
+     * independently staged for deletion, so exclude-tags must protect it
+     * (exclude-tags always wins).
      */
-    findOrphanedImages(subjectReferrers = new Map()) {
+    findOrphanedImages(subjectReferrers = new Map(), excludeTags = []) {
         const orphanedImages = new Set();
+        const excluded = new Set(excludeTags);
         const lines = [];
+        // An orphan is protected if the exclude pattern matched its digest or
+        // any of its tags (a referrer may carry more than the sha256-* tag).
+        const isExcluded = (digest, tag) => {
+            if (tag && excluded.has(tag))
+                return true;
+            if (excluded.has(digest))
+                return true;
+            const ghPackage = this.context.packageRepo.getPackageByDigest(digest);
+            return (ghPackage?.metadata.container.tags.some(t => excluded.has(t)) ?? false);
+        };
         for (const tag of this.context.packageRepo.getTags()) {
             const digest = parentDigestFromReferrerTag(tag);
             if (digest &&
                 this.context.packageRepo.getIdByDigest(digest) === undefined) {
                 const orphanDigest = this.context.packageRepo.getDigestByTag(tag);
-                if (orphanDigest) {
+                if (orphanDigest && !isExcluded(orphanDigest, tag)) {
                     orphanedImages.add(orphanDigest);
                     lines.push(tag);
                 }
@@ -111870,7 +111887,8 @@ class ImageValidator {
         for (const [subjectDigest, referrers] of subjectReferrers) {
             if (this.context.packageRepo.getIdByDigest(subjectDigest) === undefined) {
                 for (const referrerDigest of referrers) {
-                    if (this.context.packageRepo.getIdByDigest(referrerDigest)) {
+                    if (this.context.packageRepo.getIdByDigest(referrerDigest) &&
+                        !isExcluded(referrerDigest)) {
                         orphanedImages.add(referrerDigest);
                         lines.push(`${referrerDigest} (subject ${subjectDigest} missing)`);
                     }
@@ -112670,7 +112688,7 @@ class CleanupOrchestrator {
             }
         }
         if (this.config.deleteOrphanedImages) {
-            const orphanedImages = this.imageValidator.findOrphanedImages(this.subjectReferrers);
+            const orphanedImages = this.imageValidator.findOrphanedImages(this.subjectReferrers, this.excludeTags);
             for (const digest of orphanedImages) {
                 this.deleteSet.add(digest);
                 this.filterSet.delete(digest);

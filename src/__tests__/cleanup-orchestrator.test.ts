@@ -442,6 +442,22 @@ describe('CleanupOrchestrator', () => {
       )
     })
 
+    it('passes the exclude list to findOrphanedImages so exclude-tags can veto orphans', async () => {
+      config.deleteOrphanedImages = true
+      mockImageFilter.applyExclusionFilters.mockReturnValue(['sha256-abc.sig'])
+      mockImageValidator.findOrphanedImages.mockReturnValue(new Set())
+      // reload() (run's beforeEach) captured excludeTags before this
+      // override; re-run it so the new exclude list is picked up.
+      await orchestrator.reload()
+
+      await orchestrator.run()
+
+      expect(mockImageValidator.findOrphanedImages).toHaveBeenCalledWith(
+        expect.any(Map),
+        ['sha256-abc.sig']
+      )
+    })
+
     it('should apply keepNtagged policy', async () => {
       config.keepNtagged = 5
       const toDelete = new Set(['old1', 'old2'])
