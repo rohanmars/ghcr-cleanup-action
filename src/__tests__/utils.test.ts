@@ -454,6 +454,35 @@ describe('utils', () => {
       ).rejects.toThrow('boom')
     })
 
+    it('stops starting new items after the first failure', async () => {
+      // concurrency 1 makes ordering deterministic: item 2 throws, so
+      // items 3-5 must never be started.
+      const seen: number[] = []
+      await expect(
+        runWithConcurrency([1, 2, 3, 4, 5], 1, async n => {
+          seen.push(n)
+          if (n === 2) throw new Error('boom')
+        })
+      ).rejects.toThrow('boom')
+      expect(seen).toEqual([1, 2])
+    })
+
+    it('drains in-flight workers before returning (no detached work)', async () => {
+      // item 0 throws immediately; items 1 and 2 are already in flight
+      // with a delay. The call must not settle until they finish — so by
+      // the time it rejects, both have completed (not left running in the
+      // background as the old Promise.all-reject behavior did).
+      let completed = 0
+      await expect(
+        runWithConcurrency([0, 1, 2], 3, async n => {
+          if (n === 0) throw new Error('boom')
+          await new Promise(resolve => setTimeout(resolve, 20))
+          completed++
+        })
+      ).rejects.toThrow('boom')
+      expect(completed).toBe(2)
+    })
+
     it('handles empty input', async () => {
       const seen: number[] = []
       await runWithConcurrency([], 5, async n => {

@@ -50869,7 +50869,14 @@ class CleanupTaskStatistics {
 }
 /**
  * Run `worker` over `items` with bounded concurrency. Workers pull from a
- * shared index; ordering of completion is unspecified. Errors propagate.
+ * shared index; ordering of completion is unspecified.
+ *
+ * Fail-fast semantics: on the first worker error no new items are started
+ * (in-flight workers finish their current item), the whole batch is drained
+ * before returning, and the first error is rethrown. This matters because
+ * callers here delete images and flush a per-tree audit log in a `finally`
+ * — letting stray workers keep deleting/logging after the caller has moved
+ * on would corrupt that log and hide later failures.
  *
  * Used to parallelize registry manifest fetches — the registry is on
  * ghcr.io, separate rate budget from api.github.com, and axios-retry
@@ -50879,15 +50886,32 @@ class CleanupTaskStatistics {
 async function runWithConcurrency(items, concurrency, worker) {
     const limit = Math.max(1, Math.min(concurrency, items.length));
     let next = 0;
+    let failed = false;
+    let firstError;
     const launchOne = async () => {
-        while (true) {
+        while (!failed) {
             const idx = next++;
             if (idx >= items.length)
                 return;
-            await worker(items[idx], idx);
+            try {
+                await worker(items[idx], idx);
+            }
+            catch (err) {
+                // Record the first error and stop this worker. Peers finish
+                // their current in-flight item, then see the flag and return —
+                // so no new work starts, but nothing is left detached.
+                if (!failed) {
+                    failed = true;
+                    firstError = err;
+                }
+                return;
+            }
         }
     };
     await Promise.all(Array.from({ length: limit }, launchOne));
+    if (failed) {
+        throw firstError;
+    }
 }
 /** Resolve after `ms` milliseconds. */
 async function sleep(ms) {
