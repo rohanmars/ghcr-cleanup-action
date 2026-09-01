@@ -111404,7 +111404,10 @@ class ImageFilter {
             }
         }
         else {
-            const isTagMatch = wildcardMatch(this.context.config.excludeTags.split(','));
+            const isTagMatch = wildcardMatch(this.context.config.excludeTags
+                .split(',')
+                .map(s => s.trim())
+                .filter(Boolean));
             // Check all tags for matches first
             for (const tag of tagsInUse) {
                 if (isTagMatch(tag)) {
@@ -111494,7 +111497,10 @@ class ImageFilter {
             }
         }
         else {
-            const isTagMatch = wildcardMatch(this.context.config.deleteTags.split(','));
+            const isTagMatch = wildcardMatch(this.context.config.deleteTags
+                .split(',')
+                .map(s => s.trim())
+                .filter(Boolean));
             // Build match list from filterSet
             for (const digest of filterSet) {
                 const ghPackage = this.context.packageRepo.getPackageByDigest(digest);
