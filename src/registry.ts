@@ -135,7 +135,8 @@ export class Registry {
           const challenge = error.response?.headers['www-authenticate']
           if (!challenge) {
             throw new Error(
-              `${this.baseUrl} returned 401 without a www-authenticate challenge; cannot authenticate`
+              `${this.baseUrl} returned 401 without a www-authenticate challenge; cannot authenticate`,
+              { cause: error }
             )
           }
           const attributes = parseChallenge(challenge)
@@ -153,11 +154,14 @@ export class Registry {
               // auth-endpoint body can carry a credential, and this
               // reaches the (possibly public) job log via setFailed.
               throw new Error(
-                `${this.baseUrl} login failed: token service returned no token`
+                `${this.baseUrl} login failed: token service returned no token`,
+                { cause: error }
               )
             }
           } else {
-            throw new Error(`invalid www-authenticate challenge ${challenge}`)
+            throw new Error(`invalid www-authenticate challenge ${challenge}`, {
+              cause: error
+            })
           }
         } else {
           core.setFailed(
@@ -317,18 +321,22 @@ export class Registry {
         const challenge = error.response.headers['www-authenticate']
         if (!challenge) {
           throw new Error(
-            `${this.baseUrl} returned 401 without a www-authenticate challenge; cannot obtain a push token`
+            `${this.baseUrl} returned 401 without a www-authenticate challenge; cannot obtain a push token`,
+            { cause: error }
           )
         }
         const attributes = parseChallenge(challenge)
         if (!isValidChallenge(attributes)) {
-          throw new Error(`invalid www-authenticate challenge ${challenge}`)
+          throw new Error(`invalid www-authenticate challenge ${challenge}`, {
+            cause: error
+          })
         }
         const tokenResponse = await this.fetchRegistryToken(attributes)
         const token = tokenResponse.token
         if (!token) {
           throw new Error(
-            'failed to obtain push token from authentication challenge'
+            'failed to obtain push token from authentication challenge',
+            { cause: error }
           )
         }
         this.cachePushToken(token, tokenResponse.expires_in)

@@ -164,7 +164,7 @@ describe('Registry', () => {
         data: { access_token: 'super-secret-credential' }
       })
 
-      let message = ''
+      let message: string
       try {
         await registry.login('pkg')
         throw new Error('expected login to reject')

@@ -48,7 +48,7 @@ class CleanupAction {
   async run(): Promise<void> {
     const startedAt = Date.now()
 
-    let targetPackages: string[] = []
+    let targetPackages: string[]
     if (this.config.expandPackages) {
       // first make sure sure we have PAT
       const auth = createTokenAuth(this.config.token)
