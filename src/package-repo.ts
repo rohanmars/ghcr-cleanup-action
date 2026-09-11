@@ -61,6 +61,14 @@ export class PackageRepo {
   // an O(N×T) scan over every tag for every digest they process.
   referrerTagsByParent = new Map<string, string[]>()
 
+  // Delete accounting for the run. `deleteAttempts` counts real (non
+  // dry-run) DELETE calls issued; `deleteNotFound` counts those that came
+  // back 404. When every attempt 404s, the token almost certainly lacks
+  // delete:packages (GitHub returns 404 not 403) — the caller uses this
+  // to fail the run rather than silently report success.
+  deleteAttempts = 0
+  deleteNotFound = 0
+
   /**
    * Constructor
    *
@@ -338,6 +346,7 @@ export class PackageRepo {
         logger.info(` deleting package id: ${id} digest: ${digest}`)
       }
       if (!this.config.dryRun) {
+        this.deleteAttempts++
         const octokit = this.octokitClient.getClient()
         if (this.config.repoType === 'User') {
           if (this.config.tokenOwnsPackage) {
@@ -367,6 +376,7 @@ export class PackageRepo {
       }
     } catch (error) {
       if (error instanceof RequestError && error.status === 404) {
+        this.deleteNotFound++
         // 404 on DELETE means the package version is already gone — which
         // is the outcome we wanted. We only ever call this with IDs that
         // loadPackages just returned (state=active), so a 404 indicates
@@ -381,10 +391,13 @@ export class PackageRepo {
         // suspected misconfig. v1.2.0's parallel cascade exposed that
         // the guardrail blocks a real, benign scenario — multiple
         // freshly-listed children can all 404 in rapid succession when
-        // ghcr's list output is stale. The tolerate-all behaviour is
-        // restored here; genuine permission/config issues surface as
-        // 401/403 at the LIST endpoint, not as 404 on per-version
-        // DELETE-after-LIST.
+        // ghcr's list output is stale, so tolerate-all was restored.
+        //
+        // A single 404 can't be told apart here (benign staleness vs a
+        // token lacking delete:packages, which GitHub reports as 404 not
+        // 403). We keep tolerating individual 404s and instead detect the
+        // permission case at run level: if EVERY attempt 404s (see
+        // deleteAttempts/deleteNotFound), the caller fails the run.
         logger.warning(
           `The package "${targetPackage}" version id ${id} wasn't found while trying to delete it; treating as already deleted.`
         )

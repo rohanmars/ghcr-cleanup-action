@@ -249,6 +249,10 @@ export class CleanupTaskStatistics {
   name: string
   numberMultiImagesDeleted: number
   numberImagesDeleted: number
+  // Delete accounting, folded up across packages so main can detect a
+  // run where every deletion 404'd (a token that can't delete).
+  deleteAttempts = 0
+  deleteNotFound = 0
 
   constructor(
     name: string,
@@ -261,11 +265,14 @@ export class CleanupTaskStatistics {
   }
 
   add(other: CleanupTaskStatistics): CleanupTaskStatistics {
-    return new CleanupTaskStatistics(
+    const combined = new CleanupTaskStatistics(
       this.name,
       this.numberMultiImagesDeleted + other.numberMultiImagesDeleted,
       this.numberImagesDeleted + other.numberImagesDeleted
     )
+    combined.deleteAttempts = this.deleteAttempts + other.deleteAttempts
+    combined.deleteNotFound = this.deleteNotFound + other.deleteNotFound
+    return combined
   }
 
   print(): void {
